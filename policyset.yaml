@@ -1,0 +1,14 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-day2-operations
+  namespace: rhacm-policies
+spec:
+  description: Common day-2 operations baseline for OpenShift clusters
+  policies:
+    - day2-cluster-monitoring
+    - day2-image-pruner
+    - day2-etcd-encryption
+    - day2-compliance-operator
+    - day2-certificate-expiry
+    - day2-kubeadmin-removed
