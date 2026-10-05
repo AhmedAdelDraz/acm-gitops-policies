@@ -4,6 +4,7 @@ metadata:
   name: openshift-backup
   namespace: rhacm-policies
 spec:
-  description: Scheduled etcd backups to NFS
+  description: Scheduled etcd backups to NFS and OADP application backups to S3
   policies:
     - day2-etcd-backup
+    - day2-oadp-config

@@ -25,3 +25,6 @@ subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: PolicySet
     name: openshift-backup
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: openshift-day2-operators

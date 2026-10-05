@@ -1,0 +1,60 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-oadp-operator
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CP Contingency Planning
+    policy.open-cluster-management.io/controls: CP-9 System Backup
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Namespace must exist before OperatorPolicy can create the Subscription/OperatorGroup.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: oadp-operator-namespace
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-adp
+                  labels:
+                    openshift.io/cluster-monitoring: "true"
+    # OADP only supports OwnNamespace install mode. On air-gapped clusters "source"
+    # must name the mirrored CatalogSource. The channel is left to the package
+    # default; pin it (for example stable-1.4) to match the OpenShift version.
+    # The backup location is configured by day2-oadp-config in backup/.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: oadp-operator-namespace
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-oadp-operator
+        spec:
+          severity: high
+          remediationAction: enforce
+          complianceType: musthave
+          operatorGroup:
+            name: openshift-adp
+            namespace: openshift-adp
+            targetNamespaces:
+              - openshift-adp
+          subscription:
+            name: redhat-oadp-operator
+            namespace: openshift-adp
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+          upgradeApproval: Automatic
