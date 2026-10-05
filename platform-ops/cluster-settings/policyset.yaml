@@ -4,7 +4,6 @@ metadata:
   name: openshift-cluster-settings
   namespace: rhacm-policies
 spec:
-  description: Cluster-wide singletons such as the egress proxy and the console banner
+  description: Cluster-wide settings such as the console banner
   policies:
-    - day2-cluster-proxy
     - day2-console-banner

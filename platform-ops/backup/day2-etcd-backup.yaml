@@ -130,7 +130,7 @@ spec:
                               effect: NoSchedule
                           containers:
                             - name: backup
-                              image: registry.redhat.io/openshift4/ose-cli:latest
+                              image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
                               command:
                                 - /bin/bash
                                 - -c
