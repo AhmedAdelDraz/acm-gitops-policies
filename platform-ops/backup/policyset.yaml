@@ -1,0 +1,9 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-backup
+  namespace: rhacm-policies
+spec:
+  description: Scheduled etcd backups to NFS
+  policies:
+    - day2-etcd-backup

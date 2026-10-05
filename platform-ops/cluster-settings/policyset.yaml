@@ -1,0 +1,10 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-cluster-settings
+  namespace: rhacm-policies
+spec:
+  description: Cluster-wide singletons such as the egress proxy and the console banner
+  policies:
+    - day2-cluster-proxy
+    - day2-console-banner

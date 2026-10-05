@@ -1,0 +1,64 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-image-registry-infra
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
+spec:
+  remediationAction: inform
+  disabled: false
+  policy-templates:
+    # Runs the internal registry on infra nodes with 3 replicas. Storage is left as
+    # configured by the installer (object storage on cloud platforms). On platforms
+    # without object storage, uncomment the PVC template and the storage block; the
+    # claim needs a ReadWriteMany class (for example CephFS) to run more than 1 replica.
+    #
+    # - objectDefinition:
+    #     apiVersion: policy.open-cluster-management.io/v1
+    #     kind: ConfigurationPolicy
+    #     metadata:
+    #       name: image-registry-pvc
+    #     spec:
+    #       severity: high
+    #       remediationAction: inform
+    #       object-templates:
+    #         - complianceType: musthave
+    #           objectDefinition:
+    #             apiVersion: v1
+    #             kind: PersistentVolumeClaim
+    #             metadata:
+    #               name: image-registry-storage
+    #               namespace: openshift-image-registry
+    #             spec:
+    #               accessModes: ["ReadWriteMany"]
+    #               storageClassName: ocs-external-storagecluster-cephfs
+    #               resources:
+    #                 requests:
+    #                   storage: 100Gi
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: image-registry-config
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: imageregistry.operator.openshift.io/v1
+                kind: Config
+                metadata:
+                  name: cluster
+                spec:
+                  managementState: Managed
+                  replicas: 3
+                  nodeSelector:
+                    node-role.kubernetes.io/infra: ""
+                  # storage:
+                  #   managementState: Unmanaged
+                  #   pvc:
+                  #     claim: image-registry-storage

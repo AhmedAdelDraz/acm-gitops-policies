@@ -1,0 +1,12 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-infra-workloads
+  namespace: rhacm-policies
+spec:
+  description: Infra MachineConfigPool and placement of ingress, monitoring and image registry on infra nodes
+  policies:
+    - day2-infra-machineconfigpool
+    - day2-ingress-infra
+    - day2-monitoring-infra
+    - day2-image-registry-infra

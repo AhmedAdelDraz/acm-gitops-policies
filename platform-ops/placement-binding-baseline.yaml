@@ -1,0 +1,27 @@
+# Binds the grouped baseline PolicySets to the existing placement-openshift-day2
+# (all clusters with vendor=OpenShift), defined in placement.yaml.
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-openshift-day2-baseline
+  namespace: rhacm-policies
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: placement-openshift-day2
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: openshift-security-hardening
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: openshift-infra-workloads
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: openshift-node-configuration
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: openshift-cluster-settings
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: openshift-backup

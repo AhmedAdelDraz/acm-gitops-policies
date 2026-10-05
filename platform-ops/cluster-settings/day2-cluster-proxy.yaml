@@ -1,0 +1,39 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-cluster-proxy
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: SC System and Communications Protection
+    policy.open-cluster-management.io/controls: SC-7 Boundary Protection
+spec:
+  remediationAction: inform
+  disabled: false
+  policy-templates:
+    # Cluster-wide egress proxy. Replace the proxy URL and noProxy entries before
+    # enforcing; noProxy must cover the machine network, internal domains and the
+    # cluster's own domain. The user-ca-bundle ConfigMap in openshift-config must
+    # already hold the proxy CA. A wrong value here breaks image pulls and operator
+    # updates on every node, so keep this in inform until the values are verified.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: cluster-wide-proxy
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.openshift.io/v1
+                kind: Proxy
+                metadata:
+                  name: cluster
+                spec:
+                  httpProxy: http://proxy.example.com:8080
+                  httpsProxy: http://proxy.example.com:8080
+                  noProxy: .example.com,10.0.0.0/8
+                  trustedCA:
+                    name: user-ca-bundle
