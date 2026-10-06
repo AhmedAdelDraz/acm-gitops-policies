@@ -1,0 +1,80 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-logging-operators
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: AU Audit and Accountability
+    policy.open-cluster-management.io/controls: AU-6 Audit Record Review, Analysis, and Reporting
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Namespaces must exist before OperatorPolicy can create the Subscription/OperatorGroup.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: logging-operator-namespaces
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-logging
+                  labels:
+                    openshift.io/cluster-monitoring: "true"
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-cluster-observability-operator
+    # Forwarding to Google Cloud Logging with Workload Identity Federation requires
+    # Logging 6.5 or later. The channel is left to the package default; pin it here
+    # (stable-6.5 or newer) to control upgrades.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: logging-operator-namespaces
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-cluster-logging-operator
+        spec:
+          severity: high
+          remediationAction: enforce
+          complianceType: musthave
+          subscription:
+            name: cluster-logging
+            namespace: openshift-logging
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+          upgradeApproval: Automatic
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: logging-operator-namespaces
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-cluster-observability-operator
+        spec:
+          severity: high
+          remediationAction: enforce
+          complianceType: musthave
+          subscription:
+            name: cluster-observability-operator
+            namespace: openshift-cluster-observability-operator
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+          upgradeApproval: Automatic

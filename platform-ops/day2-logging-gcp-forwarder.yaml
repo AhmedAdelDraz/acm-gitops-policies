@@ -1,0 +1,175 @@
+# Forwards application, infrastructure and audit logs to Google Cloud Logging,
+# authenticating with GCP Workload Identity Federation (no service account keys).
+# Supported only on OpenShift on GCP installed with WIF (manual CCO mode).
+#
+# The Cloud Credential Operator turns the CredentialsRequest below into
+# openshift-logging/gcp-wif-secret. The collector's projected token (audience
+# "openshift", mounted by the Cluster Logging Operator at
+# /var/run/ocp-collector/serviceaccount/token) is exchanged with GCP STS for a
+# token impersonating the GCP service account.
+#
+# Everything cluster specific is discovered on the managed cluster, so no hub
+# ConfigMap is needed:
+#   - WIF audience (project number, pool, provider): read from the CCO-managed
+#     openshift-ingress-operator/cloud-credentials secret that the installer/ccoctl
+#     created for the ingress operator.
+#   - GCP project ID: Infrastructure/cluster status.
+#   - GCP service account: openshift-logging-writer@<project ID>.iam.gserviceaccount.com
+#
+# CCO cannot create the GCP service account or IAM bindings in manual mode (it has
+# no GCP admin credentials), so this is the only per-cluster prerequisite. Run it
+# with the cluster's kubeconfig and gcloud logged in to the cluster's project:
+#
+#   PROJECT_ID=$(oc get infrastructure cluster -o jsonpath='{.status.platformStatus.gcp.projectID}')
+#   AUDIENCE=$(oc get secret cloud-credentials -n openshift-ingress-operator \
+#     -o jsonpath='{.data.service_account\.json}' | base64 -d | jq -r .audience)
+#   POOL=${AUDIENCE#//iam.googleapis.com/}; POOL=${POOL%/providers/*}   # projects/<num>/locations/global/workloadIdentityPools/<pool>
+#   GSA=openshift-logging-writer@${PROJECT_ID}.iam.gserviceaccount.com
+#   gcloud iam service-accounts describe ${GSA} --project ${PROJECT_ID} >/dev/null 2>&1 || \
+#     gcloud iam service-accounts create openshift-logging-writer --project ${PROJECT_ID}
+#   gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+#     --member "serviceAccount:${GSA}" --role roles/logging.logWriter
+#   gcloud iam service-accounts add-iam-policy-binding ${GSA} --project ${PROJECT_ID} \
+#     --role roles/iam.workloadIdentityUser \
+#     --member "principal://iam.googleapis.com/${POOL}/subject/system:serviceaccount:openshift-logging:logcollector"
+#
+# Clusters sharing a project share the service account; each cluster only adds its
+# own workloadIdentityUser binding.
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-logging-gcp-forwarder
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: AU Audit and Accountability
+    policy.open-cluster-management.io/controls: AU-6 Audit Record Review, Analysis, and Reporting
+spec:
+  remediationAction: enforce
+  disabled: false
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: day2-logging-operators
+      namespace: rhacm-policies
+      compliance: Compliant
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: logging-gcp-forwarder
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: logcollector
+                  namespace: openshift-logging
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: logcollector-collect-application-logs
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: collect-application-logs
+                subjects:
+                  - kind: ServiceAccount
+                    name: logcollector
+                    namespace: openshift-logging
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: logcollector-collect-infrastructure-logs
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: collect-infrastructure-logs
+                subjects:
+                  - kind: ServiceAccount
+                    name: logcollector
+                    namespace: openshift-logging
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: logcollector-collect-audit-logs
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: collect-audit-logs
+                subjects:
+                  - kind: ServiceAccount
+                    name: logcollector
+                    namespace: openshift-logging
+            # On a WIF cluster CCO runs in Manual mode but still reconciles CredentialsRequests
+            # that set audience + serviceAccountEmail: it writes gcp-wif-secret with an
+            # external_account config (key service_account.json) pointing at cloudTokenPath.
+            # The audience is copied from the ingress operator's CCO-managed credentials, so
+            # it always matches the cluster's WIF pool/provider. A non-WIF (key-based) GCP
+            # cluster has no audience there, so do not place this policy on one.
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cloudcredential.openshift.io/v1
+                kind: CredentialsRequest
+                metadata:
+                  name: openshift-logging-gcp-wif
+                  namespace: openshift-cloud-credential-operator
+                spec:
+                  serviceAccountNames:
+                    - logcollector
+                  secretRef:
+                    name: gcp-wif-secret
+                    namespace: openshift-logging
+                  # Full path of the projected token the Cluster Logging Operator mounts in the collector.
+                  cloudTokenPath: /var/run/ocp-collector/serviceaccount/token
+                  providerSpec:
+                    apiVersion: cloudcredential.openshift.io/v1
+                    kind: GCPProviderSpec
+                    predefinedRoles:
+                      - roles/logging.logWriter
+                    skipServiceCheck: true
+                    audience: '{{ (fromSecret "openshift-ingress-operator" "cloud-credentials" "service_account.json" | base64dec | mustFromJson).audience }}'
+                    serviceAccountEmail: 'openshift-logging-writer@{{ (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.platformStatus.gcp.projectID }}.iam.gserviceaccount.com'
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: observability.openshift.io/v1
+                kind: ClusterLogForwarder
+                metadata:
+                  name: gcp-logging
+                  namespace: openshift-logging
+                spec:
+                  serviceAccount:
+                    name: logcollector
+                  outputs:
+                    - name: gcp-wif
+                      type: googleCloudLogging
+                      googleCloudLogging:
+                        authentication:
+                          credentials:
+                            secretName: gcp-wif-secret
+                            key: service_account.json
+                          token:
+                            from: serviceAccount
+                        id:
+                          type: project
+                          value: '{{ (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.platformStatus.gcp.projectID }}'
+                        logId: '{{hub .ManagedClusterName hub}}'
+                  pipelines:
+                    - name: send-to-gcp
+                      inputRefs:
+                        - application
+                        - infrastructure
+                        - audit
+                      outputRefs:
+                        - gcp-wif

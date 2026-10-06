@@ -30,3 +30,39 @@ subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: PolicySet
     name: openshift-day2-operations
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-openshift-gcp
+  namespace: rhacm-policies
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: vendor
+              operator: In
+              values: ["OpenShift"]
+            - key: cloud
+              operator: In
+              values: ["Google"]
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-openshift-gcp-logging
+  namespace: rhacm-policies
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: placement-openshift-gcp
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: openshift-gcp-logging
