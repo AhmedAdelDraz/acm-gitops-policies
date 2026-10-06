@@ -1,0 +1,10 @@
+# Placements only select clusters from ManagedClusterSets bound to their own
+# namespace. Without this binding, every Placement in rhacm-policies resolves
+# to zero clusters ("No placement found / 0 decisions").
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: global            # must equal the ManagedClusterSet name
+  namespace: rhacm-policies
+spec:
+  clusterSet: global
