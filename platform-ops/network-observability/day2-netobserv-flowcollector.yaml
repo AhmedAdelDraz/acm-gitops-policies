@@ -29,6 +29,49 @@ spec:
       namespace: rhacm-policies
       compliance: Compliant
   policy-templates:
+    # The operator only creates these bindings when it creates the netobserv
+    # namespace itself. Here the namespace comes from day2-netobserv-operators,
+    # so without them the operator cannot read the LokiStack secrets in it
+    # (FlowCollector: 'secrets "loki-query-frontend-http" is forbidden').
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-operator-rbac
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: secret-watcher
+                  namespace: netobserv
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: netobserv-secret-watcher
+                subjects:
+                  - kind: ServiceAccount
+                    name: netobserv-controller-manager
+                    namespace: openshift-netobserv-operator
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: secret-creator
+                  namespace: netobserv
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: netobserv-secret-creator
+                subjects:
+                  - kind: ServiceAccount
+                    name: netobserv-controller-manager
+                    namespace: openshift-netobserv-operator
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -151,12 +194,44 @@ spec:
                   storageClassName: {{ $sc }}
                   tenants:
                     mode: openshift-network
+    # 1x.demo runs a single ingester, so the operator keeps a replication-factor
+    # warning on the LokiStack; that is expected for this size and does not
+    # affect Ready.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-lokistack
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-lokistack-ready
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: loki.grafana.com/v1
+                kind: LokiStack
+                metadata:
+                  name: loki
+                  namespace: netobserv
+                status:
+                  conditions:
+                    - type: Ready
+                      status: "True"
     # Direct deployment model (no Kafka). The eBPF agent runs privileged, which
     # PacketDrop requires; DNSTracking and FlowRTT add DNS latency and TCP RTT.
     - extraDependencies:
         - apiVersion: policy.open-cluster-management.io/v1
           kind: ConfigurationPolicy
           name: netobserv-lokistack
+          compliance: Compliant
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-operator-rbac
           compliance: Compliant
       objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
@@ -192,3 +267,29 @@ spec:
                       name: loki
                   consolePlugin:
                     enable: true
+    # Reports NonCompliant until every FlowCollector component is up, so the
+    # policy status reflects a working stack and not just created objects.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-flowcollector
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-flowcollector-ready
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: flows.netobserv.io/v1beta2
+                kind: FlowCollector
+                metadata:
+                  name: cluster
+                status:
+                  conditions:
+                    - type: Ready
+                      status: "True"
