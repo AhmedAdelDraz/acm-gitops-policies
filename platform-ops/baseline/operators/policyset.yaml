@@ -1,0 +1,10 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: baseline-operators
+  namespace: rhacm-policies
+spec:
+  description: 'Day-2 platform operators: Gatekeeper and Descheduler'
+  policies:
+  - day2-descheduler-operator
+  - day2-gatekeeper-operator

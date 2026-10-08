@@ -29,4 +29,19 @@ placementRef:
 subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: PolicySet
-    name: openshift-day2-operations
+    name: baseline-security
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: baseline-compliance
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: baseline-pipelines
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: baseline-operators
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: baseline-infrastructure
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: baseline-cluster-settings

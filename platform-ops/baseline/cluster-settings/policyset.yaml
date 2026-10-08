@@ -1,0 +1,10 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: baseline-cluster-settings
+  namespace: rhacm-policies
+spec:
+  description: 'Cluster-wide settings: console banner, Remote Health Reporting opt-out'
+  policies:
+  - day2-console-banner
+  - day2-disable-remote-health-reporting
