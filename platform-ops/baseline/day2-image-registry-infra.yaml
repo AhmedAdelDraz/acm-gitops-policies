@@ -8,36 +8,20 @@ metadata:
     policy.open-cluster-management.io/categories: CM Configuration Management
     policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
 spec:
-  remediationAction: inform
+  remediationAction: enforce
   disabled: false
   policy-templates:
-    # Runs the internal registry on infra nodes with 3 replicas. Storage is left as
-    # configured by the installer (object storage on cloud platforms). On platforms
-    # without object storage, uncomment the PVC template and the storage block; the
-    # claim needs a ReadWriteMany class (for example CephFS) to run more than 1 replica.
+    # Runs the internal registry on infra nodes when the cluster has any; clusters
+    # without infra nodes are left as they are. Storage and managementState are left
+    # as configured for the platform. Replicas are raised (one per infra node, up to
+    # 3) only on object storage: a PVC or emptyDir backed registry stays at its
+    # current replica count, since a ReadWriteOnce claim cannot be shared.
     #
-    # - objectDefinition:
-    #     apiVersion: policy.open-cluster-management.io/v1
-    #     kind: ConfigurationPolicy
-    #     metadata:
-    #       name: image-registry-pvc
-    #     spec:
-    #       severity: high
-    #       remediationAction: inform
-    #       object-templates:
-    #         - complianceType: musthave
-    #           objectDefinition:
-    #             apiVersion: v1
-    #             kind: PersistentVolumeClaim
-    #             metadata:
-    #               name: image-registry-storage
-    #               namespace: openshift-image-registry
-    #             spec:
-    #               accessModes: ["ReadWriteMany"]
-    #               storageClassName: ocs-external-storagecluster-cephfs
-    #               resources:
-    #                 requests:
-    #                   storage: 100Gi
+    # recordDiff is off because the spec carries the registry httpSecret.
+    #
+    # As in day2-ingress-infra, the current spec is read back and only nodeSelector,
+    # tolerations and replicas are replaced, so an existing node selector is
+    # replaced rather than merged and every other field is preserved.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -45,20 +29,35 @@ spec:
           name: image-registry-config
         spec:
           severity: medium
-          remediationAction: inform
-          object-templates:
-            - complianceType: musthave
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- $infra := len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items }}
+            {{- if gt $infra 0 }}
+            {{- $spec := dict }}
+            {{- with (lookup "imageregistry.operator.openshift.io/v1" "Config" "" "cluster").spec }}{{ $spec = . }}{{ end }}
+            {{- $scalable := true }}
+            {{- with $spec.storage }}{{ if or .pvc .emptyDir }}{{ $scalable = false }}{{ end }}{{ end }}
+            {{- if $scalable }}
+            {{- $replicas := $infra }}{{ if gt $infra 3 }}{{ $replicas = 3 }}{{ end }}
+            {{- $_ := set $spec "replicas" $replicas }}
+            {{- end }}
+            {{- $_ := set $spec "nodeSelector" (dict "node-role.kubernetes.io/infra" "") }}
+            {{- $_ = set $spec "tolerations" (list (dict "key" "node-role.kubernetes.io/infra" "operator" "Exists")) }}
+            - complianceType: mustonlyhave
+              metadataComplianceType: musthave
+              recordDiff: None
               objectDefinition:
                 apiVersion: imageregistry.operator.openshift.io/v1
                 kind: Config
                 metadata:
                   name: cluster
-                spec:
-                  managementState: Managed
-                  replicas: 3
-                  nodeSelector:
-                    node-role.kubernetes.io/infra: ""
-                  # storage:
-                  #   managementState: Unmanaged
-                  #   pvc:
-                  #     claim: image-registry-storage
+                spec: {{ $spec | toRawJson }}
+            {{- else }}
+            - complianceType: musthave
+              recordDiff: None
+              objectDefinition:
+                apiVersion: imageregistry.operator.openshift.io/v1
+                kind: Config
+                metadata:
+                  name: cluster
+            {{- end }}

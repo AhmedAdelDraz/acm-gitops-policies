@@ -8,12 +8,14 @@ metadata:
     policy.open-cluster-management.io/categories: CM Configuration Management
     policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
 spec:
-  remediationAction: inform
+  remediationAction: enforce
   disabled: false
   policy-templates:
-    # Moves the platform monitoring stack to infra nodes and gives Prometheus and
-    # Alertmanager persistent storage from the cluster's default StorageClass.
-    # Add storageClassName to the volumeClaimTemplates to pin a specific class.
+    # Platform monitoring baseline: user workload monitoring on, 15 days of metrics.
+    # Decided on each managed cluster:
+    #   - infra nodes present: every component moves to them.
+    #   - default StorageClass present: Prometheus and Alertmanager get persistent
+    #     storage from it (otherwise they keep emptyDir and would stay Pending on PVCs).
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -21,8 +23,13 @@ spec:
           name: cluster-monitoring-config
         spec:
           severity: medium
-          remediationAction: inform
-          object-templates:
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- $infra := gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items) 0 }}
+            {{- $pvc := false }}
+            {{- range (lookup "storage.k8s.io/v1" "StorageClass" "" "").items }}
+            {{- range $k, $v := .metadata.annotations }}{{ if and (eq $k "storageclass.kubernetes.io/is-default-class") (eq $v "true") }}{{ $pvc = true }}{{ end }}{{ end }}
+            {{- end }}
             - complianceType: musthave
               objectDefinition:
                 apiVersion: v1
@@ -34,40 +41,44 @@ spec:
                   config.yaml: |
                     enableUserWorkload: true
                     alertmanagerMain:
+                      enabled: true
+                      {{- if $infra }}
                       nodeSelector:
                         node-role.kubernetes.io/infra: ""
+                      tolerations:
+                        - key: node-role.kubernetes.io/infra
+                          operator: Exists
+                      {{- end }}
+                      {{- if $pvc }}
                       volumeClaimTemplate:
                         spec:
                           resources:
                             requests:
                               storage: 5Gi
+                      {{- end }}
                     prometheusK8s:
                       retention: 15d
+                      {{- if $infra }}
                       nodeSelector:
                         node-role.kubernetes.io/infra: ""
+                      tolerations:
+                        - key: node-role.kubernetes.io/infra
+                          operator: Exists
+                      {{- end }}
+                      {{- if $pvc }}
                       volumeClaimTemplate:
                         spec:
                           resources:
                             requests:
                               storage: 100Gi
-                    prometheusOperator:
+                      {{- end }}
+                    {{- if $infra }}
+                    {{- range list "prometheusOperator" "metricsServer" "kubeStateMetrics" "telemeterClient" "openshiftStateMetrics" "thanosQuerier" "monitoringPlugin" }}
+                    {{ . }}:
                       nodeSelector:
                         node-role.kubernetes.io/infra: ""
-                    metricsServer:
-                      nodeSelector:
-                        node-role.kubernetes.io/infra: ""
-                    kubeStateMetrics:
-                      nodeSelector:
-                        node-role.kubernetes.io/infra: ""
-                    telemeterClient:
-                      nodeSelector:
-                        node-role.kubernetes.io/infra: ""
-                    openshiftStateMetrics:
-                      nodeSelector:
-                        node-role.kubernetes.io/infra: ""
-                    thanosQuerier:
-                      nodeSelector:
-                        node-role.kubernetes.io/infra: ""
-                    monitoringPlugin:
-                      nodeSelector:
-                        node-role.kubernetes.io/infra: ""
+                      tolerations:
+                        - key: node-role.kubernetes.io/infra
+                          operator: Exists
+                    {{- end }}
+                    {{- end }}

@@ -8,7 +8,7 @@ metadata:
     policy.open-cluster-management.io/categories: SC System and Communications Protection
     policy.open-cluster-management.io/controls: SC-28 Protection of Information at Rest
 spec:
-  remediationAction: inform
+  remediationAction: enforce
   disabled: false
   policy-templates:
     - objectDefinition:
@@ -18,7 +18,7 @@ spec:
           name: apiserver-etcd-encryption
         spec:
           severity: high
-          remediationAction: inform
+          remediationAction: enforce
           object-templates:
             - complianceType: musthave
               objectDefinition:
