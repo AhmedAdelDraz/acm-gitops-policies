@@ -1,0 +1,54 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-disable-self-provisioner
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: AC Access Control
+    policy.open-cluster-management.io/controls: AC-6 Least Privilege
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # autoupdate=false stops the API server from restoring the default rules/subjects on restart.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: remove-self-provisioner-rules
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRole
+                metadata:
+                  name: self-provisioner
+                  annotations:
+                    rbac.authorization.kubernetes.io/autoupdate: "false"
+                rules: []
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: remove-self-provisioners-subjects
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: self-provisioners
+                  annotations:
+                    rbac.authorization.kubernetes.io/autoupdate: "false"
+                subjects: []
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: self-provisioner

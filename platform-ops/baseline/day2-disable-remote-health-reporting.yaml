@@ -1,0 +1,37 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-disable-remote-health-reporting
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: AC Access Control
+    policy.open-cluster-management.io/controls: AC-4 Information Flow Enforcement
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Opts the cluster out of Remote Health Reporting (Telemetry and Insights) the
+    # way Red Hat documents it: by removing the cloud.openshift.com credential from
+    # the global pull secret. The template reads the cluster's current pull secret
+    # and writes it back without that one entry, so mirror-registry credentials are
+    # untouched and the result is the same on every evaluation.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: pull-secret-without-telemetry
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: pull-secret
+                  namespace: openshift-config
+                type: kubernetes.io/dockerconfigjson
+                data:
+                  .dockerconfigjson: '{{ $ps := fromSecret "openshift-config" "pull-secret" ".dockerconfigjson" | base64dec | mustFromJson }}{{ $_ := unset $ps.auths "cloud.openshift.com" }}{{ $ps | mustToRawJson | base64enc }}'

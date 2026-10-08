@@ -1,0 +1,87 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-descheduler-operator
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: SC System and Communications Protection
+    policy.open-cluster-management.io/controls: SC-6 Resource Availability
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Namespace must exist before OperatorPolicy can create the Subscription/OperatorGroup.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: descheduler-operator-namespace
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-kube-descheduler-operator
+                  labels:
+                    openshift.io/cluster-monitoring: "true"
+    # On air-gapped clusters "source" must name the mirrored CatalogSource.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: descheduler-operator-namespace
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-descheduler-operator
+        spec:
+          severity: medium
+          remediationAction: enforce
+          complianceType: musthave
+          operatorGroup:
+            name: openshift-kube-descheduler-operator
+            namespace: openshift-kube-descheduler-operator
+            targetNamespaces:
+              - openshift-kube-descheduler-operator
+          subscription:
+            name: cluster-kube-descheduler-operator
+            namespace: openshift-kube-descheduler-operator
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+          upgradeApproval: Automatic
+    # Starts in Predictive mode: the descheduler only reports which pods it would
+    # evict (descheduler_pods_evicted metric). Switch mode to Automatic once the
+    # results have been reviewed.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1beta1
+          kind: OperatorPolicy
+          name: install-descheduler-operator
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: kube-descheduler-instance
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.openshift.io/v1
+                kind: KubeDescheduler
+                metadata:
+                  name: cluster
+                  namespace: openshift-kube-descheduler-operator
+                spec:
+                  managementState: Managed
+                  mode: Predictive
+                  deschedulingIntervalSeconds: 3600
+                  profiles:
+                    - AffinityAndTaints
