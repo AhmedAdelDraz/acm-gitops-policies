@@ -1,0 +1,10 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: baseline-compliance
+  namespace: rhacm-policies
+spec:
+  description: Compliance Operator with PCI-DSS v4.0 platform and node scans, and scan results
+  policies:
+  - day2-compliance-operator
+  - day2-compliance-pci-dss-results

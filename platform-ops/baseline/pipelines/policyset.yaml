@@ -1,0 +1,9 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: baseline-pipelines
+  namespace: rhacm-policies
+spec:
+  description: OpenShift Pipelines (Tekton)
+  policies:
+  - day2-openshift-pipelines
