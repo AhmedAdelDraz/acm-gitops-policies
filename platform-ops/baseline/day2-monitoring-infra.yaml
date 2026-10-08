@@ -1,0 +1,73 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-monitoring-infra
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
+spec:
+  remediationAction: inform
+  disabled: false
+  policy-templates:
+    # Moves the platform monitoring stack to infra nodes and gives Prometheus and
+    # Alertmanager persistent storage from the cluster's default StorageClass.
+    # Add storageClassName to the volumeClaimTemplates to pin a specific class.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: cluster-monitoring-config
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: cluster-monitoring-config
+                  namespace: openshift-monitoring
+                data:
+                  config.yaml: |
+                    enableUserWorkload: true
+                    alertmanagerMain:
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""
+                      volumeClaimTemplate:
+                        spec:
+                          resources:
+                            requests:
+                              storage: 5Gi
+                    prometheusK8s:
+                      retention: 15d
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""
+                      volumeClaimTemplate:
+                        spec:
+                          resources:
+                            requests:
+                              storage: 100Gi
+                    prometheusOperator:
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""
+                    metricsServer:
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""
+                    kubeStateMetrics:
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""
+                    telemeterClient:
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""
+                    openshiftStateMetrics:
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""
+                    thanosQuerier:
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""
+                    monitoringPlugin:
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""

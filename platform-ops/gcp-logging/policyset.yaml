@@ -1,0 +1,10 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-gcp-logging
+  namespace: rhacm-policies
+spec:
+  description: Log forwarding to Google Cloud Logging with Workload Identity Federation for OpenShift on GCP
+  policies:
+    - day2-logging-operators
+    - day2-logging-gcp-forwarder

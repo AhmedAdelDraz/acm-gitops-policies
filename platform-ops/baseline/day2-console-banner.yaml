@@ -1,0 +1,35 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-console-banner
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: AC Access Control
+    policy.open-cluster-management.io/controls: AC-8 System Use Notification
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # The cluster name is resolved on each managed cluster from its "name" ClusterClaim,
+    # so one policy serves every cluster in the placement.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: console-restricted-banner
+        spec:
+          severity: low
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: console.openshift.io/v1
+                kind: ConsoleNotification
+                metadata:
+                  name: restricted-environment-banner
+                spec:
+                  text: 'Restricted Environment - {{ fromClusterClaim "name" }}'
+                  location: BannerTop
+                  color: "#ffffff"
+                  backgroundColor: "#000000"

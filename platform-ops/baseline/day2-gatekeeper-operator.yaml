@@ -1,0 +1,64 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-gatekeeper-operator
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-7 Least Functionality
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # The operator runs cluster-wide from openshift-operators, which already has the
+    # global OperatorGroup. On air-gapped clusters "source" must name the mirrored
+    # CatalogSource (oc get catalogsource -n openshift-marketplace). The channel is
+    # left to the package default; pin it here to control upgrades.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-gatekeeper-operator
+        spec:
+          severity: high
+          remediationAction: enforce
+          complianceType: musthave
+          subscription:
+            name: gatekeeper-operator-product
+            namespace: openshift-operators
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+          upgradeApproval: Automatic
+    # The operator does nothing until a Gatekeeper instance exists. Mutation is left
+    # off so only validating constraints are evaluated.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1beta1
+          kind: OperatorPolicy
+          name: install-gatekeeper-operator
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: gatekeeper-instance
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.gatekeeper.sh/v1alpha1
+                kind: Gatekeeper
+                metadata:
+                  name: gatekeeper
+                spec:
+                  audit:
+                    replicas: 1
+                    logLevel: INFO
+                  validatingWebhook: Enabled
+                  mutatingWebhook: Disabled
+                  webhook:
+                    replicas: 2
+                    logLevel: INFO
+                    emitAdmissionEvents: Disabled
