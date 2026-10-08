@@ -21,3 +21,4 @@ spec:
     - day2-oauth-token-duration
     - day2-compliance-operator
     - day2-compliance-pci-dss-results
+    - day2-default-network-policies

@@ -1,0 +1,91 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-default-network-policies
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: SC System and Communications Protection
+    policy.open-cluster-management.io/controls: SC-7 Boundary Protection
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Namespace isolation for every application namespace: pods accept traffic
+    # only from pods in the same namespace. Two platform sources stay allowed,
+    # as in Red Hat's documented defaults:
+    #   - the ingress routers, otherwise Routes to the namespace stop working;
+    #   - cluster and user workload monitoring, otherwise metrics scraping stops.
+    # Egress is not restricted. NetworkPolicies are additive, so any policy a
+    # namespace already has keeps allowing what it allowed.
+    #
+    # Platform namespaces are excluded because their components talk across
+    # namespaces. New namespaces are picked up on the next evaluation. To leave
+    # an application namespace out, label it
+    # network-policy.day2.openshift.io/default=disabled.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: default-namespace-isolation
+        spec:
+          severity: high
+          remediationAction: enforce
+          namespaceSelector:
+            include: ["*"]
+            exclude:
+              - default
+              - "kube*"
+              - "openshift*"
+              - "open-cluster-management*"
+              - multicluster-engine
+              - hive
+              - hypershift
+              - assisted-installer
+              - "cert-manager*"
+              - "netobserv*"
+            matchExpressions:
+              - key: network-policy.day2.openshift.io/default
+                operator: NotIn
+                values: ["disabled"]
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: networking.k8s.io/v1
+                kind: NetworkPolicy
+                metadata:
+                  name: allow-same-namespace
+                spec:
+                  podSelector: {}
+                  policyTypes: ["Ingress"]
+                  ingress:
+                    - from:
+                        - podSelector: {}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: networking.k8s.io/v1
+                kind: NetworkPolicy
+                metadata:
+                  name: allow-from-openshift-ingress
+                spec:
+                  podSelector: {}
+                  policyTypes: ["Ingress"]
+                  ingress:
+                    - from:
+                        - namespaceSelector:
+                            matchLabels:
+                              policy-group.network.openshift.io/ingress: ""
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: networking.k8s.io/v1
+                kind: NetworkPolicy
+                metadata:
+                  name: allow-from-openshift-monitoring
+                spec:
+                  podSelector: {}
+                  policyTypes: ["Ingress"]
+                  ingress:
+                    - from:
+                        - namespaceSelector:
+                            matchLabels:
+                              network.openshift.io/policy-group: monitoring
