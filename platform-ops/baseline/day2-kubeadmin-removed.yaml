@@ -1,0 +1,74 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-kubeadmin-removed
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: AC Access Control
+    policy.open-cluster-management.io/controls: AC-2 Account Management
+spec:
+  # No policy-level remediationAction: the safety check stays inform, the
+  # removal is enforced.
+  disabled: false
+  policy-templates:
+    # Removing kubeadmin cannot be undone, so it only happens on clusters where
+    # someone else can still log in as an administrator: at least one identity
+    # provider is configured AND a non-system User or Group is bound to
+    # cluster-admin. Otherwise this check is NonCompliant with a placeholder
+    # identity provider named after the missing prerequisite, and the removal
+    # below stays pending.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: kubeadmin-removal-prerequisites
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates-raw: |
+            {{- $idps := (lookup "config.openshift.io/v1" "OAuth" "" "cluster").spec.identityProviders }}
+            {{- $admins := false }}
+            {{- range $b := (lookup "rbac.authorization.k8s.io/v1" "ClusterRoleBinding" "" "").items }}
+            {{- if eq $b.roleRef.name "cluster-admin" }}
+            {{- range $s := $b.subjects }}
+            {{- if and (or (eq $s.kind "User") (eq $s.kind "Group")) (not (hasPrefix "system:" $s.name)) }}{{ $admins = true }}{{ end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.openshift.io/v1
+                kind: OAuth
+                metadata:
+                  name: cluster
+                {{- if not $idps }}
+                spec:
+                  identityProviders:
+                    - name: missing-identity-provider-kubeadmin-kept
+                {{- else if not $admins }}
+                spec:
+                  identityProviders:
+                    - name: missing-cluster-admin-user-kubeadmin-kept
+                {{- end }}
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: kubeadmin-removal-prerequisites
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: kubeadmin-secret-removed
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: mustnothave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: kubeadmin
+                  namespace: kube-system

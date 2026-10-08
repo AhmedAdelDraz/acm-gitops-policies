@@ -1,0 +1,33 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-openshift-pipelines
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Runs cluster-wide from openshift-operators, which already has the global
+    # OperatorGroup. The operator creates its default TektonConfig (profile "all")
+    # itself. The channel is pinned because OperatorPolicy otherwise reads the
+    # default from the first PackageManifest with this name it finds.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-openshift-pipelines
+        spec:
+          severity: medium
+          remediationAction: enforce
+          complianceType: musthave
+          subscription:
+            name: openshift-pipelines-operator-rh
+            namespace: openshift-operators
+            channel: latest
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+          upgradeApproval: Automatic

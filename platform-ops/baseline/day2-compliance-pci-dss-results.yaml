@@ -1,0 +1,66 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-compliance-pci-dss-results
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: PCI-DSS v4.0
+    policy.open-cluster-management.io/categories: CA Assessment, Authorization, and Monitoring
+    policy.open-cluster-management.io/controls: CA-7 Continuous Monitoring
+spec:
+  # Report only: this policy surfaces the PCI-DSS scan outcome in ACM and is
+  # expected to stay NonCompliant until the failing checks are remediated.
+  remediationAction: inform
+  disabled: false
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: day2-compliance-operator
+      namespace: rhacm-policies
+      compliance: Compliant
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: compliance-pci-dss-scan-done
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: compliance.openshift.io/v1alpha1
+                kind: ComplianceSuite
+                metadata:
+                  name: pci-dss
+                  namespace: openshift-compliance
+                status:
+                  phase: DONE
+    # Every failed check of the suite is listed as a violation; list them on the
+    # cluster with:
+    #   oc get compliancecheckresult -n openshift-compliance \
+    #     -l compliance.openshift.io/suite=pci-dss,compliance.openshift.io/check-status=FAIL
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: compliance-pci-dss-scan-done
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: compliance-pci-dss-no-failed-checks
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: mustnothave
+              objectDefinition:
+                apiVersion: compliance.openshift.io/v1alpha1
+                kind: ComplianceCheckResult
+                metadata:
+                  namespace: openshift-compliance
+                  labels:
+                    compliance.openshift.io/suite: pci-dss
+                    compliance.openshift.io/check-status: FAIL
