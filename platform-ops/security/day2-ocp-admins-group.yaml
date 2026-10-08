@@ -1,0 +1,56 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-ocp-admins-group
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: AC Access Control
+    policy.open-cluster-management.io/controls: AC-2 Account Management
+spec:
+  remediationAction: inform
+  disabled: false
+  policy-templates:
+    # Replace the users below with the identity-provider user names of the cluster
+    # administrators before enforcing.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: ocp-admins-group
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: user.openshift.io/v1
+                kind: Group
+                metadata:
+                  name: ocp-admins
+                users:
+                  - admin-user-1
+                  - admin-user-2
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: ocp-admins-cluster-admin-binding
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: ocp-admins-cluster-admin
+                subjects:
+                  - apiGroup: rbac.authorization.k8s.io
+                    kind: Group
+                    name: ocp-admins
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: cluster-admin

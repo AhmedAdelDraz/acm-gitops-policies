@@ -1,0 +1,106 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-ntp-chrony
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: AU Audit and Accountability
+    policy.open-cluster-management.io/controls: AU-8 Time Stamps
+spec:
+  remediationAction: inform
+  disabled: false
+  policy-templates:
+    # Points every node at the internal NTP servers. Each MachineConfig triggers a
+    # rolling reboot of its pool, so enforce only when no other MachineConfig change
+    # is in progress (oc get mcp shows UPDATED=True everywhere).
+    #
+    # The source below is the URL-encoded form of:
+    #   server ntp1.example.com iburst
+    #   server ntp2.example.com iburst
+    #   driftfile /var/lib/chrony/drift
+    #   makestep 1.0 3
+    #   rtcsync
+    #   logdir /var/log/chrony
+    # Replace ntp1/ntp2.example.com with the real servers in both MachineConfigs.
+    #
+    # If the installer was given its own 99-<role>-chrony-configuration manifests,
+    # they write the same file; remove them so these overrides are the only source.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: remove-install-time-chrony-mc
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates:
+            - complianceType: mustnothave
+              objectDefinition:
+                apiVersion: machineconfiguration.openshift.io/v1
+                kind: MachineConfig
+                metadata:
+                  name: 99-master-chrony-configuration
+            - complianceType: mustnothave
+              objectDefinition:
+                apiVersion: machineconfiguration.openshift.io/v1
+                kind: MachineConfig
+                metadata:
+                  name: 99-worker-chrony-configuration
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: chrony-master
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: machineconfiguration.openshift.io/v1
+                kind: MachineConfig
+                metadata:
+                  name: 99-master-chrony-conf-override
+                  labels:
+                    machineconfiguration.openshift.io/role: master
+                spec:
+                  config:
+                    ignition:
+                      version: 3.4.0
+                    storage:
+                      files:
+                        - path: /etc/chrony.conf
+                          mode: 420
+                          overwrite: true
+                          contents:
+                            source: data:,server%20ntp1.example.com%20iburst%0Aserver%20ntp2.example.com%20iburst%0Adriftfile%20%2Fvar%2Flib%2Fchrony%2Fdrift%0Amakestep%201.0%203%0Artcsync%0Alogdir%20%2Fvar%2Flog%2Fchrony%0A
+    # Worker MachineConfigs are also rendered into the infra pool.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: chrony-worker
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: machineconfiguration.openshift.io/v1
+                kind: MachineConfig
+                metadata:
+                  name: 99-worker-chrony-conf-override
+                  labels:
+                    machineconfiguration.openshift.io/role: worker
+                spec:
+                  config:
+                    ignition:
+                      version: 3.4.0
+                    storage:
+                      files:
+                        - path: /etc/chrony.conf
+                          mode: 420
+                          overwrite: true
+                          contents:
+                            source: data:,server%20ntp1.example.com%20iburst%0Aserver%20ntp2.example.com%20iburst%0Adriftfile%20%2Fvar%2Flib%2Fchrony%2Fdrift%0Amakestep%201.0%203%0Artcsync%0Alogdir%20%2Fvar%2Flog%2Fchrony%0A

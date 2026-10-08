@@ -1,0 +1,11 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-cluster-settings
+  namespace: rhacm-policies
+spec:
+  description: Cluster-wide settings (console banner, Remote Health Reporting opt-out, default catalog sources off)
+  policies:
+    - day2-console-banner
+    - day2-disable-remote-health-reporting
+    - day2-disable-default-catalogsources

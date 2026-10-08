@@ -1,0 +1,10 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-security-hardening
+  namespace: rhacm-policies
+spec:
+  description: Access control baseline for OpenShift clusters
+  policies:
+    - day2-disable-self-provisioner
+    - day2-ocp-admins-group

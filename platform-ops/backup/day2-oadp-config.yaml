@@ -1,0 +1,117 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-oadp-config
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CP Contingency Planning
+    policy.open-cluster-management.io/controls: CP-9 System Backup
+spec:
+  remediationAction: inform
+  disabled: false
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: day2-oadp-operator
+      namespace: rhacm-policies
+      compliance: Compliant
+  policy-templates:
+    # Velero credentials are copied from a Secret on the hub so they never live in Git.
+    # Create it once in the policy namespace, in AWS credentials-file format:
+    #
+    #   cat > credentials-velero <<EOF
+    #   [default]
+    #   aws_access_key_id=<key>
+    #   aws_secret_access_key=<secret>
+    #   EOF
+    #   oc -n rhacm-policies create secret generic oadp-s3-credentials --from-file=cloud=credentials-velero
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: oadp-cloud-credentials
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: cloud-credentials
+                  namespace: openshift-adp
+                type: Opaque
+                data:
+                  cloud: '{{hub fromSecret "rhacm-policies" "oadp-s3-credentials" "cloud" hub}}'
+    # Backups go to an on-premises S3-compatible store (ODF/NooBaa, MinIO, Ceph RGW).
+    # Set s3Url and bucket before enforcing; each cluster writes under its own prefix.
+    # If the endpoint uses a private CA, add objectStorage.caCert (base64 PEM).
+    # Volume data is copied with Kopia via the node agent, so no cloud snapshot
+    # provider is needed.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: oadp-cloud-credentials
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: oadp-data-protection-application
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: oadp.openshift.io/v1alpha1
+                kind: DataProtectionApplication
+                metadata:
+                  name: dpa-default
+                  namespace: openshift-adp
+                spec:
+                  configuration:
+                    velero:
+                      defaultPlugins:
+                        - openshift
+                        - aws
+                        - csi
+                    nodeAgent:
+                      enable: true
+                      uploaderType: kopia
+                  backupLocations:
+                    - name: default
+                      velero:
+                        provider: aws
+                        default: true
+                        credential:
+                          name: cloud-credentials
+                          key: cloud
+                        objectStorage:
+                          bucket: oadp-backups
+                          prefix: '{{ fromClusterClaim "name" }}'
+                        config:
+                          profile: default
+                          region: us-east-1
+                          s3Url: https://s3.example.com
+                          s3ForcePathStyle: "true"
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: oadp-backup-location-available
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: velero.io/v1
+                kind: BackupStorageLocation
+                metadata:
+                  name: default
+                  namespace: openshift-adp
+                status:
+                  phase: Available

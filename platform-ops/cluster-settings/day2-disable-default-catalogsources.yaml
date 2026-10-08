@@ -1,0 +1,34 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-disable-default-catalogsources
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-7 Least Functionality
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Removes the default redhat-operators, certified-operators, community-operators
+    # and redhat-marketplace CatalogSources, which pull from registry.redhat.io and
+    # cannot be reached on air-gapped clusters. Operators are then installed only from
+    # the mirrored CatalogSource created by oc-mirror, which is not affected by this.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: operatorhub-disable-default-sources
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.openshift.io/v1
+                kind: OperatorHub
+                metadata:
+                  name: cluster
+                spec:
+                  disableAllDefaultSources: true

@@ -1,0 +1,9 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-node-configuration
+  namespace: rhacm-policies
+spec:
+  description: MachineConfig-based node settings (NTP); each one reboots nodes, so enforce them one at a time
+  policies:
+    - day2-ntp-chrony

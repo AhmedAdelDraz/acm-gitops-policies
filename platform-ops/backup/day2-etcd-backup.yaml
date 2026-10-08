@@ -1,0 +1,145 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-etcd-backup
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CP Contingency Planning
+    policy.open-cluster-management.io/controls: CP-9 System Backup
+spec:
+  remediationAction: inform
+  disabled: false
+  policy-templates:
+    # Every 6 hours a job opens a debug pod on one control-plane node, mounts the NFS
+    # export and runs cluster-backup.sh into it, keeping 3 days of backups.
+    # Set the NFS export below before enforcing. Each cluster writes into its own
+    # sub-directory (named from its "name" ClusterClaim), which must exist on the export.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: etcd-backup-rbac
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: ocp-etcd-backup
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: openshift-backup
+                  namespace: ocp-etcd-backup
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRole
+                metadata:
+                  name: cluster-etcd-backup
+                rules:
+                  - apiGroups: [""]
+                    resources: ["nodes"]
+                    verbs: ["get", "list"]
+                  - apiGroups: [""]
+                    resources: ["pods", "pods/log", "pods/attach"]
+                    verbs: ["get", "list", "create", "delete", "watch"]
+                  - apiGroups: [""]
+                    resources: ["namespaces"]
+                    verbs: ["get", "list", "create"]
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: openshift-backup
+                subjects:
+                  - kind: ServiceAccount
+                    name: openshift-backup
+                    namespace: ocp-etcd-backup
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: cluster-etcd-backup
+            # oc debug creates a privileged pod in ocp-etcd-backup.
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: scc-privileged-openshift-backup
+                  namespace: ocp-etcd-backup
+                subjects:
+                  - kind: ServiceAccount
+                    name: openshift-backup
+                    namespace: ocp-etcd-backup
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: system:openshift:scc:privileged
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: etcd-backup-rbac
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: etcd-backup-cronjob
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: batch/v1
+                kind: CronJob
+                metadata:
+                  name: openshift-backup
+                  namespace: ocp-etcd-backup
+                  labels:
+                    app: openshift-backup
+                spec:
+                  schedule: "0 */6 * * *"
+                  concurrencyPolicy: Forbid
+                  successfulJobsHistoryLimit: 5
+                  failedJobsHistoryLimit: 5
+                  jobTemplate:
+                    spec:
+                      backoffLimit: 0
+                      template:
+                        metadata:
+                          labels:
+                            app: openshift-backup
+                        spec:
+                          serviceAccountName: openshift-backup
+                          restartPolicy: Never
+                          activeDeadlineSeconds: 3600
+                          nodeSelector:
+                            node-role.kubernetes.io/control-plane: ""
+                          tolerations:
+                            - key: node-role.kubernetes.io/master
+                              operator: Exists
+                              effect: NoSchedule
+                          containers:
+                            - name: backup
+                              image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+                              command:
+                                - /bin/bash
+                                - -c
+                                - >-
+                                  oc get nodes -l node-role.kubernetes.io/master --no-headers -o name | head -n 1 |
+                                  xargs -I {} -- oc debug {} --to-namespace=ocp-etcd-backup -- bash -c
+                                  'chroot /host rm -rf /home/core/backup &&
+                                  chroot /host mkdir /home/core/backup &&
+                                  chroot /host mount -t nfs nfs.example.com:/exports/etcd-backup/{{ fromClusterClaim "name" }} /home/core/backup &&
+                                  chroot /host /usr/local/bin/cluster-backup.sh /home/core/backup &&
+                                  chroot /host find /home/core/backup/ -type f -mtime +3 -delete;
+                                  rc=$?; chroot /host umount /home/core/backup; exit $rc'

@@ -1,0 +1,11 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-day2-operators
+  namespace: rhacm-policies
+spec:
+  description: Operator installs (Gatekeeper, OADP, Descheduler) from the mirrored catalog
+  policies:
+    - day2-gatekeeper-operator
+    - day2-oadp-operator
+    - day2-descheduler-operator
