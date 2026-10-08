@@ -1,0 +1,98 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-compliance-operator
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CA Assessment, Authorization, and Monitoring
+    policy.open-cluster-management.io/controls: CA-7 Continuous Monitoring
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # The scanner pods run privileged on every node.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: compliance-operator-namespace
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-compliance
+                  labels:
+                    openshift.io/cluster-monitoring: "true"
+                    pod-security.kubernetes.io/enforce: privileged
+    # Installed in its own namespace, watching only that namespace (the layout
+    # Red Hat documents). Channel pinned for the same reason as the other operators.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: compliance-operator-namespace
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-compliance-operator
+        spec:
+          severity: high
+          remediationAction: enforce
+          complianceType: musthave
+          operatorGroup:
+            name: openshift-compliance
+            namespace: openshift-compliance
+            targetNamespaces:
+              - openshift-compliance
+          subscription:
+            name: compliance-operator
+            namespace: openshift-compliance
+            channel: stable
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+          upgradeApproval: Automatic
+    # PCI-DSS v4.0 is the profile set that fits the banking sector: the platform
+    # profile checks cluster configuration, the node profile checks every node.
+    # The "default" ScanSetting scans master and worker nodes daily at 01:00 and
+    # keeps raw results on a PVC from the default StorageClass. Remediations are
+    # not applied automatically; review them first (many trigger node reboots).
+    # Results are reported by day2-compliance-pci-dss-results.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1beta1
+          kind: OperatorPolicy
+          name: install-compliance-operator
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: compliance-pci-dss-scan
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: compliance.openshift.io/v1alpha1
+                kind: ScanSettingBinding
+                metadata:
+                  name: pci-dss
+                  namespace: openshift-compliance
+                profiles:
+                  - apiGroup: compliance.openshift.io/v1alpha1
+                    kind: Profile
+                    name: ocp4-pci-dss-4-0
+                  - apiGroup: compliance.openshift.io/v1alpha1
+                    kind: Profile
+                    name: ocp4-pci-dss-node-4-0
+                settingsRef:
+                  apiGroup: compliance.openshift.io/v1alpha1
+                  kind: ScanSetting
+                  name: default
