@@ -1,0 +1,38 @@
+# Opt-in: label a managed cluster with network-observability=enabled to install
+# Network Observability on it. The cluster needs the Multicloud Object Gateway
+# (openshift-storage.noobaa.io StorageClass) and a default StorageClass.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-openshift-network-observability
+  namespace: rhacm-policies
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: vendor
+              operator: In
+              values: ["OpenShift"]
+            - key: network-observability
+              operator: In
+              values: ["enabled"]
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-openshift-network-observability
+  namespace: rhacm-policies
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: placement-openshift-network-observability
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: openshift-network-observability

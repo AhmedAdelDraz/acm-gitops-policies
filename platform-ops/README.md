@@ -12,6 +12,9 @@ All objects live in the `rhacm-policies` namespace on the hub.
   its policies, its own `policyset.yaml`, and its own `placement.yaml`
   (Placement + PlacementBinding).
   - `gcp-logging/`: log forwarding to Google Cloud Logging (`cloud=Google`).
+  - `network-observability/`: Network Observability with a privileged eBPF
+    agent (PacketDrop, DNSTracking, FlowRTT) and a `1x.demo` LokiStack on MCG
+    object storage. Opt-in: label the cluster `network-observability=enabled`.
 
 To add a baseline policy, drop it into `baseline/` and list it in
 `baseline/policyset.yaml`. To add a cluster-specific one, create a new folder

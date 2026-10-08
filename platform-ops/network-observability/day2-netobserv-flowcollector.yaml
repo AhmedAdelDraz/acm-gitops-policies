@@ -1,0 +1,295 @@
+# Network Observability with the smallest Loki setup, on clusters that run the
+# Multicloud Object Gateway (NooBaa, part of ODF).
+#
+# Everything cluster specific is discovered on the managed cluster:
+#   - Loki object storage: an ObjectBucketClaim on the openshift-storage.noobaa.io
+#     StorageClass; the bucket credentials and endpoint come from the Secret and
+#     ConfigMap that MCG generates for the claim.
+#   - S3 TLS: the endpoint is the in-cluster s3.openshift-storage.svc, whose
+#     certificate is signed by the service CA; it is injected into loki-s3-ca.
+#   - Loki PVCs: the cluster's default StorageClass.
+#
+# No policy-level remediationAction: the "-ready" templates only check status and
+# stay inform, everything else is enforced.
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-netobserv-flowcollector
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: SI System and Information Integrity
+    policy.open-cluster-management.io/controls: SI-4 System Monitoring
+spec:
+  disabled: false
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: day2-netobserv-operators
+      namespace: rhacm-policies
+      compliance: Compliant
+  policy-templates:
+    # The operator only creates these bindings when it creates the netobserv
+    # namespace itself. Here the namespace comes from day2-netobserv-operators,
+    # so without them the operator cannot read the LokiStack secrets in it
+    # (FlowCollector: 'secrets "loki-query-frontend-http" is forbidden').
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-operator-rbac
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: secret-watcher
+                  namespace: netobserv
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: netobserv-secret-watcher
+                subjects:
+                  - kind: ServiceAccount
+                    name: netobserv-controller-manager
+                    namespace: openshift-netobserv-operator
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: secret-creator
+                  namespace: netobserv
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: netobserv-secret-creator
+                subjects:
+                  - kind: ServiceAccount
+                    name: netobserv-controller-manager
+                    namespace: openshift-netobserv-operator
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-loki-bucket
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: objectbucket.io/v1alpha1
+                kind: ObjectBucketClaim
+                metadata:
+                  name: loki-netobserv
+                  namespace: netobserv
+                spec:
+                  generateBucketName: loki-netobserv
+                  storageClassName: openshift-storage.noobaa.io
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: loki-s3-ca
+                  namespace: netobserv
+                  annotations:
+                    service.beta.openshift.io/inject-cabundle: "true"
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-loki-bucket
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-loki-bucket-ready
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: objectbucket.io/v1alpha1
+                kind: ObjectBucketClaim
+                metadata:
+                  name: loki-netobserv
+                  namespace: netobserv
+                status:
+                  phase: Bound
+    # The claim's Secret and ConfigMap share its name. fromSecret already returns
+    # base64; ConfigMap values are encoded here.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-loki-bucket-ready
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-loki-s3-secret
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: loki-s3
+                  namespace: netobserv
+                type: Opaque
+                data:
+                  access_key_id: '{{ fromSecret "netobserv" "loki-netobserv" "AWS_ACCESS_KEY_ID" }}'
+                  access_key_secret: '{{ fromSecret "netobserv" "loki-netobserv" "AWS_SECRET_ACCESS_KEY" }}'
+                  bucketnames: '{{ fromConfigMap "netobserv" "loki-netobserv" "BUCKET_NAME" | base64enc }}'
+                  endpoint: '{{ printf "https://%s:%s" (fromConfigMap "netobserv" "loki-netobserv" "BUCKET_HOST") (fromConfigMap "netobserv" "loki-netobserv" "BUCKET_PORT") | base64enc }}'
+    # 1x.demo is the smallest LokiStack size (single replica of each component,
+    # not for production).
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-loki-s3-secret
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-lokistack
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- $sc := "" }}
+            {{- range $s := (lookup "storage.k8s.io/v1" "StorageClass" "" "").items }}
+            {{- range $k, $v := $s.metadata.annotations }}{{ if and (eq $k "storageclass.kubernetes.io/is-default-class") (eq $v "true") }}{{ $sc = $s.metadata.name }}{{ end }}{{ end }}
+            {{- end }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: loki.grafana.com/v1
+                kind: LokiStack
+                metadata:
+                  name: loki
+                  namespace: netobserv
+                spec:
+                  size: 1x.demo
+                  storage:
+                    schemas:
+                      - version: v13
+                        effectiveDate: "2024-10-01"
+                    secret:
+                      name: loki-s3
+                      type: s3
+                    tls:
+                      caName: loki-s3-ca
+                      caKey: service-ca.crt
+                  storageClassName: {{ $sc }}
+                  tenants:
+                    mode: openshift-network
+    # 1x.demo runs a single ingester, so the operator keeps a replication-factor
+    # warning on the LokiStack; that is expected for this size and does not
+    # affect Ready.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-lokistack
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-lokistack-ready
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: loki.grafana.com/v1
+                kind: LokiStack
+                metadata:
+                  name: loki
+                  namespace: netobserv
+                status:
+                  conditions:
+                    - type: Ready
+                      status: "True"
+    # Direct deployment model (no Kafka). The eBPF agent runs privileged, which
+    # PacketDrop requires; DNSTracking and FlowRTT add DNS latency and TCP RTT.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-lokistack
+          compliance: Compliant
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-operator-rbac
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-flowcollector
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: flows.netobserv.io/v1beta2
+                kind: FlowCollector
+                metadata:
+                  name: cluster
+                spec:
+                  namespace: netobserv
+                  deploymentModel: Direct
+                  agent:
+                    type: eBPF
+                    ebpf:
+                      privileged: true
+                      sampling: 50
+                      features:
+                        - PacketDrop
+                        - DNSTracking
+                        - FlowRTT
+                  loki:
+                    enable: true
+                    mode: LokiStack
+                    lokiStack:
+                      name: loki
+                  consolePlugin:
+                    enable: true
+    # Reports NonCompliant until every FlowCollector component is up, so the
+    # policy status reflects a working stack and not just created objects.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-flowcollector
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-flowcollector-ready
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: flows.netobserv.io/v1beta2
+                kind: FlowCollector
+                metadata:
+                  name: cluster
+                status:
+                  conditions:
+                    - type: Ready
+                      status: "True"

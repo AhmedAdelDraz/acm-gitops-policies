@@ -1,0 +1,105 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-netobserv-operators
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: SI System and Information Integrity
+    policy.open-cluster-management.io/controls: SI-4 System Monitoring
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Namespaces must exist before OperatorPolicy can create the Subscription/OperatorGroup.
+    # netobserv holds the LokiStack and the FlowCollector components; the operator
+    # creates netobserv-privileged for the eBPF agent itself.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: netobserv-namespaces
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-operators-redhat
+                  labels:
+                    openshift.io/cluster-monitoring: "true"
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-netobserv-operator
+                  labels:
+                    openshift.io/cluster-monitoring: "true"
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: netobserv
+                  labels:
+                    openshift.io/cluster-monitoring: "true"
+    # Both operators run cluster-wide; OperatorPolicy creates an AllNamespaces
+    # OperatorGroup in each namespace.
+    #
+    # Channels are pinned: community-operators also publishes a "loki-operator"
+    # package, and without a channel OperatorPolicy reads the default channel from
+    # whichever PackageManifest it finds first, which can be the community one
+    # ("catalog specified in the policy does not match ... PackageManifest").
+    #
+    # The Loki Operator is a prerequisite of Network Observability, so the
+    # Network Observability operator is only installed once Loki is in place.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-namespaces
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-loki-operator
+        spec:
+          severity: medium
+          remediationAction: enforce
+          complianceType: musthave
+          subscription:
+            name: loki-operator
+            namespace: openshift-operators-redhat
+            channel: stable-6.6
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+          upgradeApproval: Automatic
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: netobserv-namespaces
+          compliance: Compliant
+        - apiVersion: policy.open-cluster-management.io/v1beta1
+          kind: OperatorPolicy
+          name: install-loki-operator
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-netobserv-operator
+        spec:
+          severity: medium
+          remediationAction: enforce
+          complianceType: musthave
+          subscription:
+            name: netobserv-operator
+            namespace: openshift-netobserv-operator
+            channel: stable
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+          upgradeApproval: Automatic
