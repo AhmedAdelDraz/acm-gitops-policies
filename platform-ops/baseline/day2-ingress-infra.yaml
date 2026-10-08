@@ -8,9 +8,19 @@ metadata:
     policy.open-cluster-management.io/categories: CM Configuration Management
     policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
 spec:
-  remediationAction: inform
+  remediationAction: enforce
   disabled: false
   policy-templates:
+    # Moves the default router to infra nodes, one replica per infra node up to 3.
+    # The infra nodes are looked up on each managed cluster, so clusters without
+    # infra nodes (for example single-node OpenShift) keep their current placement
+    # and the policy is safe to enforce everywhere.
+    #
+    # musthave would merge the node selector into an existing one (for example
+    # node-role.kubernetes.io/worker), which dedicated infra nodes would not match.
+    # So the current spec is read back, nodePlacement and replicas are replaced,
+    # and the result is enforced with mustonlyhave: every other field (default
+    # certificate, endpoint strategy, TLS, ...) stays exactly as it is.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -18,8 +28,25 @@ spec:
           name: ingress-controller-infra
         spec:
           severity: medium
-          remediationAction: inform
-          object-templates:
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- $infra := len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items }}
+            {{- if gt $infra 0 }}
+            {{- $replicas := $infra }}{{ if gt $infra 3 }}{{ $replicas = 3 }}{{ end }}
+            {{- $spec := dict }}
+            {{- with (lookup "operator.openshift.io/v1" "IngressController" "openshift-ingress-operator" "default").spec }}{{ $spec = . }}{{ end }}
+            {{- $_ := set $spec "replicas" $replicas }}
+            {{- $_ = set $spec "nodePlacement" (dict "nodeSelector" (dict "matchLabels" (dict "node-role.kubernetes.io/infra" "")) "tolerations" (list (dict "key" "node-role.kubernetes.io/infra" "operator" "Exists"))) }}
+            - complianceType: mustonlyhave
+              metadataComplianceType: musthave
+              objectDefinition:
+                apiVersion: operator.openshift.io/v1
+                kind: IngressController
+                metadata:
+                  name: default
+                  namespace: openshift-ingress-operator
+                spec: {{ $spec | toRawJson }}
+            {{- else }}
             - complianceType: musthave
               objectDefinition:
                 apiVersion: operator.openshift.io/v1
@@ -27,9 +54,4 @@ spec:
                 metadata:
                   name: default
                   namespace: openshift-ingress-operator
-                spec:
-                  replicas: 3
-                  nodePlacement:
-                    nodeSelector:
-                      matchLabels:
-                        node-role.kubernetes.io/infra: ""
+            {{- end }}
