@@ -48,8 +48,15 @@ spec:
                   labels:
                     openshift.io/cluster-monitoring: "true"
     # Both operators run cluster-wide; OperatorPolicy creates an AllNamespaces
-    # OperatorGroup in each namespace. Channels are left to the package default;
-    # pin them here to control upgrades.
+    # OperatorGroup in each namespace.
+    #
+    # Channels are pinned: community-operators also publishes a "loki-operator"
+    # package, and without a channel OperatorPolicy reads the default channel from
+    # whichever PackageManifest it finds first, which can be the community one
+    # ("catalog specified in the policy does not match ... PackageManifest").
+    #
+    # The Loki Operator is a prerequisite of Network Observability, so the
+    # Network Observability operator is only installed once Loki is in place.
     - extraDependencies:
         - apiVersion: policy.open-cluster-management.io/v1
           kind: ConfigurationPolicy
@@ -67,6 +74,7 @@ spec:
           subscription:
             name: loki-operator
             namespace: openshift-operators-redhat
+            channel: stable-6.6
             source: redhat-operators
             sourceNamespace: openshift-marketplace
           upgradeApproval: Automatic
@@ -74,6 +82,10 @@ spec:
         - apiVersion: policy.open-cluster-management.io/v1
           kind: ConfigurationPolicy
           name: netobserv-namespaces
+          compliance: Compliant
+        - apiVersion: policy.open-cluster-management.io/v1beta1
+          kind: OperatorPolicy
+          name: install-loki-operator
           compliance: Compliant
       objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1beta1
@@ -87,6 +99,7 @@ spec:
           subscription:
             name: netobserv-operator
             namespace: openshift-netobserv-operator
+            channel: stable
             source: redhat-operators
             sourceNamespace: openshift-marketplace
           upgradeApproval: Automatic
