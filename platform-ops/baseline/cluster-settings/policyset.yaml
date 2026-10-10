@@ -4,7 +4,8 @@ metadata:
   name: baseline-cluster-settings
   namespace: rhacm-policies
 spec:
-  description: 'Cluster-wide settings: console banner, Remote Health Reporting opt-out'
+  description: 'Cluster-wide settings: console banner, Remote Health Reporting opt-out, update channel check'
   policies:
   - day2-console-banner
   - day2-disable-remote-health-reporting
+  - day2-update-channel

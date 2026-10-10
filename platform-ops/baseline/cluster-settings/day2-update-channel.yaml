@@ -1,0 +1,39 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-update-channel
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-3 Configuration Change Control
+spec:
+  # Report only: the channel is never changed by this policy.
+  remediationAction: inform
+  disabled: false
+  policy-templates:
+    # Compliant when the cluster follows a stable-* or eus-* update channel.
+    # On fast-*, candidate-* or no channel, the template asks for the stable
+    # channel of the running minor version (e.g. stable-4.22), so the violation
+    # shows the current channel and the recommended one. Switch with:
+    #   oc adm upgrade channel stable-<major>.<minor>
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: cluster-update-channel-supported
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates-raw: |
+            {{- $cv := lookup "config.openshift.io/v1" "ClusterVersion" "" "version" }}
+            {{- $channel := $cv.spec.channel | default "" }}
+            {{- $minor := regexFind "^[0-9]+\\.[0-9]+" $cv.status.desired.version }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.openshift.io/v1
+                kind: ClusterVersion
+                metadata:
+                  name: version
+                spec:
+                  channel: {{ if regexMatch "^(stable|eus)-" $channel }}{{ $channel }}{{ else }}stable-{{ $minor }}{{ end }}
