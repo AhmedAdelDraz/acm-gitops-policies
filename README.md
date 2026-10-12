@@ -1,4 +1,4 @@
-# platform-ops policies
+# acm-gitops-policies
 
 Day-2 configuration for OpenShift clusters managed by Red Hat Advanced Cluster
 Management (ACM), delivered as ACM Policies through GitOps.
@@ -11,7 +11,7 @@ Every README explains what changes on a cluster with **3 dedicated infra nodes**
 ## Layout
 
 ```
-platform-ops/
+acm-gitops-policies/   (repository root)
 ├── managedclustersetbinding.yaml   # binds the "global" ClusterSet; every Placement depends on it
 ├── baseline/                       # every OpenShift cluster, no cluster-specific parameters
 │   ├── placement.yaml              # placement-openshift-day2 (vendor=OpenShift), binds all sections
@@ -63,11 +63,11 @@ The hub needs the `global` ManagedClusterSet bound to `rhacm-policies`
 (`managedclustersetbinding.yaml`); without it every Placement selects zero
 clusters ("No placement found").
 
-- **Argo CD:** an Application on path `platform-ops` with
+- **Argo CD:** an Application on path `.` (repository root) with
   **Directory Recurse = true** (`spec.source.directory.recurse: true`). Without
   recursion only the top-level file is synced and, with prune enabled, every
   policy in a subfolder is deleted.
-- **Manually:** `oc apply -R -f platform-ops`.
+- **Manually:** from the repository root, `oc apply -R -f .`
 
 Check results:
 
