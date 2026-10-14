@@ -4,10 +4,11 @@ metadata:
   name: baseline-security
   namespace: rhacm-policies
 spec:
-  description: 'Security hardening: etcd encryption, access control, OAuth token lifetime, namespace network isolation'
+  description: 'Security hardening: etcd encryption, htpasswd identity provider, access control, OAuth token lifetime, namespace network isolation'
   policies:
   - day2-default-network-policies
   - day2-disable-self-provisioner
   - day2-etcd-encryption
+  - day2-htpasswd-identity-provider
   - day2-kubeadmin-removed
   - day2-oauth-token-duration
