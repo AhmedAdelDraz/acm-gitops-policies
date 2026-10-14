@@ -1,0 +1,140 @@
+# Enables the GCP Filestore CSI driver and a ReadWriteMany StorageClass on OpenShift
+# on GCP installed with Workload Identity Federation (CCO in Manual mode). The GCP
+# Persistent Disk driver (ReadWriteOnce, standard-csi/ssd-csi) is installed by
+# OpenShift itself and needs no policy.
+#
+# The driver authenticates as the GCP service account
+# openshift-filestore-csi@<project ID>.iam.gserviceaccount.com. CCO cannot create
+# that account or its IAM bindings in Manual mode, so run this once per cluster with
+# the cluster's kubeconfig and gcloud logged in to the cluster's project:
+#
+#   PROJECT_ID=$(oc get infrastructure cluster -o jsonpath='{.status.platformStatus.gcp.projectID}')
+#   AUDIENCE=$(oc get secret cloud-credentials -n openshift-ingress-operator \
+#     -o jsonpath='{.data.service_account\.json}' | base64 -d | jq -r .audience)
+#   POOL=${AUDIENCE#//iam.googleapis.com/}; POOL=${POOL%/providers/*}   # projects/<num>/locations/global/workloadIdentityPools/<pool>
+#   GSA=openshift-filestore-csi@${PROJECT_ID}.iam.gserviceaccount.com
+#   gcloud services enable file.googleapis.com --project ${PROJECT_ID}
+#   gcloud iam service-accounts describe ${GSA} --project ${PROJECT_ID} >/dev/null 2>&1 || \
+#     gcloud iam service-accounts create openshift-filestore-csi --project ${PROJECT_ID}
+#   for ROLE in roles/file.editor roles/resourcemanager.tagUser; do
+#     gcloud projects add-iam-policy-binding ${PROJECT_ID} --member "serviceAccount:${GSA}" --role ${ROLE}
+#   done
+#   for KSA in gcp-filestore-csi-driver-operator gcp-filestore-csi-driver-controller-sa; do
+#     gcloud iam service-accounts add-iam-policy-binding ${GSA} --project ${PROJECT_ID} \
+#       --role roles/iam.workloadIdentityUser \
+#       --member "principal://iam.googleapis.com/${POOL}/subject/system:serviceaccount:openshift-cluster-csi-drivers:${KSA}"
+#   done
+#
+# Clusters sharing a project share the service account; each cluster only adds its
+# own workloadIdentityUser bindings.
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-gcp-filestore-driver
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
+spec:
+  disabled: false
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: day2-gcp-filestore-operator
+      namespace: rhacm-policies
+      compliance: Compliant
+  policy-templates:
+    # The operator deploys the driver only once this object exists.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: gcp-filestore-clustercsidriver
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.openshift.io/v1
+                kind: ClusterCSIDriver
+                metadata:
+                  name: filestore.csi.storage.gke.io
+                spec:
+                  managementState: Managed
+    # Filestore instances are attached to the cluster VPC by direct peering. The VPC
+    # is <infrastructure name>-network on an installer-created network; a cluster in
+    # an existing VPC names it as network-name in openshift-config/cloud-provider-config.
+    # Not the default class: Filestore "standard" volumes start at 1 TiB, so use it
+    # only for claims that need ReadWriteMany.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: gcp-filestore-clustercsidriver
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: gcp-filestore-storageclass
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- $network := printf "%s-network" (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.infrastructureName }}
+            {{- with regexFind "(?m)^\\s*network-name\\s*=\\s*\\S+" (fromConfigMap "openshift-config" "cloud-provider-config" "config") }}
+            {{- $network = regexReplaceAll "^\\s*network-name\\s*=\\s*" . "" }}
+            {{- end }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: storage.k8s.io/v1
+                kind: StorageClass
+                metadata:
+                  name: filestore-csi
+                provisioner: filestore.csi.storage.gke.io
+                parameters:
+                  connect-mode: DIRECT_PEERING
+                  network: {{ $network }}
+                allowVolumeExpansion: true
+                reclaimPolicy: Delete
+                volumeBindingMode: WaitForFirstConsumer
+    # Report-only: NonCompliant until the CCO has issued the WIF credentials and every
+    # driver controller replica is ready. The controller exits at start when it cannot
+    # get a GCP token, so a crash-looping controller usually means the one-time gcloud
+    # step above has not been run (driver log: "Gaia id not found for email ...").
+    # Deployment Available is not enough: with maxUnavailable it stays True while the
+    # only replica of a single-node cluster is crash-looping.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: gcp-filestore-clustercsidriver
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: gcp-filestore-driver-ready
+        spec:
+          severity: medium
+          remediationAction: inform
+          object-templates-raw: |
+            {{- $replicas := 1 }}
+            {{- with (lookup "apps/v1" "Deployment" "openshift-cluster-csi-drivers" "gcp-filestore-csi-driver-controller").spec }}{{ $replicas = .replicas }}{{ end }}
+            - complianceType: musthave
+              recordDiff: None
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: gcp-filestore-cloud-credentials
+                  namespace: openshift-cluster-csi-drivers
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: gcp-filestore-csi-driver-controller
+                  namespace: openshift-cluster-csi-drivers
+                status:
+                  readyReplicas: {{ $replicas }}
