@@ -1,0 +1,10 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-gcp-storage
+  namespace: rhacm-policies
+spec:
+  description: GCP Filestore CSI driver (ReadWriteMany) with Workload Identity Federation for OpenShift on GCP
+  policies:
+    - day2-gcp-filestore-operator
+    - day2-gcp-filestore-driver

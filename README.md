@@ -22,6 +22,7 @@ acm-gitops-policies/   (repository root)
 │   ├── infrastructure/             # infra MCP; ingress, monitoring, registry on infra nodes
 │   └── cluster-settings/           # console banner, telemetry opt-out, update channel check
 ├── gcp-logging/                    # cluster-specific: cloud=Google
+├── gcp-storage/                    # cluster-specific: cloud=Google (Filestore RWX storage)
 └── network-observability/          # cluster-specific: opt-in label network-observability=enabled
 ```
 
@@ -34,6 +35,7 @@ acm-gitops-policies/   (repository root)
 | Infrastructure | `baseline-infrastructure` | all OpenShift clusters | [baseline/infrastructure](baseline/infrastructure/README.md) |
 | Cluster settings | `baseline-cluster-settings` | all OpenShift clusters | [baseline/cluster-settings](baseline/cluster-settings/README.md) |
 | GCP logging | `openshift-gcp-logging` | `vendor=OpenShift`, `cloud=Google` | [gcp-logging](gcp-logging/README.md) |
+| GCP storage | `openshift-gcp-storage` | `vendor=OpenShift`, `cloud=Google` | [gcp-storage](gcp-storage/README.md) |
 | Network Observability | `openshift-network-observability` | `vendor=OpenShift`, `network-observability=enabled` | [network-observability](network-observability/README.md) |
 
 ## Conventions
@@ -107,6 +109,7 @@ policies are applied:
 | Infrastructure | infra MCP gets the nodes; 3 router replicas on infra; monitoring on infra; registry on infra | registry stays at 1 replica on a ReadWriteOnce PVC: move it to object storage for 3 replicas |
 | Network Observability | — | LokiStack `1x.demo` → `1x.pico` or larger; tolerations for the eBPF agent and flowlogs-pipeline; optionally Loki on infra |
 | GCP logging | — | collector must tolerate the infra taint |
+| GCP storage | Filestore node driver tolerates all taints | none |
 | Compliance | node scans keep working (scanner tolerates all taints) | optional: add the `infra` role to the ScanSetting |
 | Operators | — | Descheduler: consider `Automatic` mode and more profiles |
 | Security, Pipelines, Cluster settings | no change | none |

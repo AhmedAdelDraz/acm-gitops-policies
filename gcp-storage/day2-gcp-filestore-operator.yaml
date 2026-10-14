@@ -1,0 +1,52 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-gcp-filestore-operator
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # Installs the GCP Filestore CSI Driver Operator in openshift-cluster-csi-drivers
+    # (the namespace exists on every OpenShift cluster; the operator only supports
+    # AllNamespaces, so the OperatorGroup has no target namespaces).
+    #
+    # With Workload Identity Federation the operator reads POOL_ID, PROJECT_NUMBER,
+    # PROVIDER_ID and SERVICE_ACCOUNT_EMAIL from its environment and writes them into
+    # the CredentialsRequest it creates; the CCO then generates
+    # openshift-cluster-csi-drivers/gcp-filestore-cloud-credentials. The values are
+    # split out of the audience in the CCO-managed ingress operator credentials:
+    #   //iam.googleapis.com/projects/<4: number>/locations/global/workloadIdentityPools/<8: pool>/providers/<10: provider>
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: install-gcp-filestore-csi-driver-operator
+        spec:
+          severity: high
+          remediationAction: enforce
+          complianceType: musthave
+          operatorGroup:
+            name: openshift-cluster-csi-drivers
+            namespace: openshift-cluster-csi-drivers
+          subscription:
+            name: gcp-filestore-csi-driver-operator
+            namespace: openshift-cluster-csi-drivers
+            channel: stable
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+            config:
+              env:
+                - name: PROJECT_NUMBER
+                  value: '{{ index (splitList "/" (fromSecret "openshift-ingress-operator" "cloud-credentials" "service_account.json" | base64dec | mustFromJson).audience) 4 }}'
+                - name: POOL_ID
+                  value: '{{ index (splitList "/" (fromSecret "openshift-ingress-operator" "cloud-credentials" "service_account.json" | base64dec | mustFromJson).audience) 8 }}'
+                - name: PROVIDER_ID
+                  value: '{{ index (splitList "/" (fromSecret "openshift-ingress-operator" "cloud-credentials" "service_account.json" | base64dec | mustFromJson).audience) 10 }}'
+                - name: SERVICE_ACCOUNT_EMAIL
+                  value: 'openshift-filestore-csi@{{ (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.platformStatus.gcp.projectID }}.iam.gserviceaccount.com'
+          upgradeApproval: Automatic
