@@ -10,13 +10,17 @@ console (**Observe → Network Traffic**).
 oc label managedcluster <cluster> network-observability=enabled
 ```
 
-The cluster also needs the Multicloud Object Gateway
+Loki needs object storage. On **OpenShift on GCP installed with Workload
+Identity Federation** it uses a **Google Cloud Storage** bucket (see
+[GCS on GCP](#gcs-on-gcp)); on every other cluster it uses the Multicloud
+Object Gateway (`openshift-storage.noobaa.io` StorageClass, part of ODF). The
+cluster also needs a default StorageClass.
 (`openshift-storage.noobaa.io` StorageClass, part of ODF) and a default
 StorageClass.
 
 | Policy | Mode | What it does |
 |---|---|---|
-| `day2-netobserv-operators` | enforce | Namespaces `openshift-operators-redhat`, `openshift-netobserv-operator`, `netobserv`. **Loki Operator first** (channel `stable-6.6`), then the Network Observability Operator (channel `stable`). Both channels are pinned because `community-operators` also ships `loki-operator`. |
+| `day2-netobserv-operators` | enforce | On GCP with WIF, the Loki Operator gets the WIF pool, provider, project number and GCP service account as environment variables. Namespaces `openshift-operators-redhat`, `openshift-netobserv-operator`, `netobserv`. **Loki Operator first** (channel `stable-6.6`), then the Network Observability Operator (channel `stable`). Both channels are pinned because `community-operators` also ships `loki-operator`. |
 | `day2-netobserv-flowcollector` | enforce + inform checks | Depends on the policy above. Steps, in order (see below). |
 
 `day2-netobserv-flowcollector` steps:
@@ -52,6 +56,63 @@ exist.
 oc get lokistack loki -n netobserv
 oc get flowcollector cluster -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
 oc get pods -n netobserv; oc get pods -n netobserv-privileged
+```
+
+## GCS on GCP
+
+Detected from the WIF audience in the CCO-managed
+`openshift-ingress-operator/cloud-credentials` secret. Steps 2-4 then create
+Secret `loki-gcs` (only `bucketname`) instead of the ObjectBucketClaim and
+`loki-s3`, and the LokiStack uses `type: gcs`. The Loki Operator creates a
+CredentialsRequest `netobserv/loki`; the CCO writes
+`netobserv/loki-managed-credentials`, and Loki exchanges its ServiceAccount
+token with GCP STS for a token impersonating
+`openshift-loki@<project ID>.iam.gserviceaccount.com`. No keys are stored.
+
+| Discovered on the cluster | Value |
+|---|---|
+| Bucket | `<GCP project ID>-<infrastructure name>-loki` (max 63 characters) |
+| GCP service account | `openshift-loki@<GCP project ID>.iam.gserviceaccount.com` |
+| Kubernetes ServiceAccounts | `netobserv/loki`, `netobserv/loki-ruler` |
+
+**Per-cluster prerequisite (one time).** The CCO cannot create buckets, service
+accounts or IAM bindings in Manual mode. Run with the cluster's kubeconfig and
+gcloud logged in to the cluster's project:
+
+```bash
+PROJECT_ID=$(oc get infrastructure cluster -o jsonpath='{.status.platformStatus.gcp.projectID}')
+REGION=$(oc get infrastructure cluster -o jsonpath='{.status.platformStatus.gcp.region}')
+INFRA=$(oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}')
+AUDIENCE=$(oc get secret cloud-credentials -n openshift-ingress-operator \
+  -o jsonpath='{.data.service_account\.json}' | base64 -d | jq -r .audience)
+POOL=${AUDIENCE#//iam.googleapis.com/}; POOL=${POOL%/providers/*}
+BUCKET=${PROJECT_ID}-${INFRA}-loki
+GSA=openshift-loki@${PROJECT_ID}.iam.gserviceaccount.com
+
+gcloud storage buckets create gs://${BUCKET} --project ${PROJECT_ID} \
+  --location ${REGION} --uniform-bucket-level-access
+gcloud iam service-accounts describe ${GSA} --project ${PROJECT_ID} >/dev/null 2>&1 || \
+  gcloud iam service-accounts create openshift-loki --project ${PROJECT_ID}
+gcloud storage buckets add-iam-policy-binding gs://${BUCKET} \
+  --member "serviceAccount:${GSA}" --role roles/storage.objectAdmin
+for KSA in loki loki-ruler; do
+  gcloud iam service-accounts add-iam-policy-binding ${GSA} --project ${PROJECT_ID} \
+    --role roles/iam.workloadIdentityUser \
+    --member "principal://iam.googleapis.com/${POOL}/subject/system:serviceaccount:netobserv:${KSA}"
+done
+```
+
+Until this is done every policy is Compliant and the LokiStack is Ready, but
+the ingester cannot flush flows to the bucket (`Gaia id not found for email
+openshift-loki@...` or a 403 in `oc logs -n netobserv loki-ingester-0`), and
+flows older than the ingester's in-memory window are lost. Check the write path
+without waiting for a regular flush:
+
+```bash
+oc exec -n netobserv loki-ingester-0 -- curl -sk -X POST https://localhost:3100/flush \
+  --cert /var/run/tls/http/server/tls.crt --key /var/run/tls/http/server/tls.key
+oc logs -n netobserv loki-ingester-0 --since=2m | grep -i 'failed to flush'   # empty = OK
+gcloud storage ls gs://${BUCKET}/network/ | head
 ```
 
 ## Current setup (single node)
