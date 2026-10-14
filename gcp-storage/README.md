@@ -15,7 +15,7 @@ Manual mode). Do not place it on a key-based GCP cluster.
 | Policy | Mode | What it does |
 |---|---|---|
 | `day2-gcp-filestore-operator` | enforce | GCP Filestore CSI Driver Operator in `openshift-cluster-csi-drivers` (channel `stable`), with the WIF pool, provider, project number and GCP service account passed to it as environment variables. |
-| `day2-gcp-filestore-driver` | enforce | Depends on the policy above. `ClusterCSIDriver/filestore.csi.storage.gke.io` (deploys the driver) and the `filestore-csi` StorageClass on the cluster VPC. An inform check reports when the WIF credentials secret exists and the driver controller is Available. |
+| `day2-gcp-filestore-driver` | enforce | Depends on the policy above. `ClusterCSIDriver/filestore.csi.storage.gke.io` (deploys the driver) and the `filestore-csi` StorageClass on the cluster VPC. An inform check reports when the WIF credentials secret exists and every driver controller replica is ready. |
 
 ## How authentication works
 
@@ -44,8 +44,9 @@ Create them with `gcloud`; the exact commands are in the header of
    `gcp-filestore-csi-driver-operator` and `gcp-filestore-csi-driver-controller-sa`
    ServiceAccounts in `openshift-cluster-csi-drivers`.
 
-Until this is done the policies apply cleanly, but the driver cannot create
-Filestore instances and `day2-gcp-filestore-driver` stays NonCompliant.
+Until this is done the policies apply cleanly, but the driver controller
+crash-loops (`Gaia id not found for email openshift-filestore-csi@...` in the
+`csi-driver` container log) and `day2-gcp-filestore-driver` stays NonCompliant.
 
 **Verify:**
 
@@ -85,8 +86,10 @@ need ReadWriteMany.
 
 ## Current setup
 
-Validated on the GCP SNO lab (`local-cluster`, OpenShift 4.22, WIF) for
-structure, server-side admission and template values.
+Deployed on the GCP SNO lab (`local-cluster`, OpenShift 4.22, WIF):
+operator installed, WIF credentials issued by the CCO, driver and
+`filestore-csi` StorageClass created, and the GCP STS token exchange accepted
+the cluster's token. Volume provisioning waits for the GCP prerequisite above.
 
 ## Required changes for 3 infra nodes
 

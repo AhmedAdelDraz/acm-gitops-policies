@@ -99,9 +99,12 @@ spec:
                 allowVolumeExpansion: true
                 reclaimPolicy: Delete
                 volumeBindingMode: WaitForFirstConsumer
-    # Report-only: NonCompliant until the CCO has issued the WIF credentials and the
-    # driver controller is running. A missing credentials secret usually means the
-    # one-time gcloud step above has not been run.
+    # Report-only: NonCompliant until the CCO has issued the WIF credentials and every
+    # driver controller replica is ready. The controller exits at start when it cannot
+    # get a GCP token, so a crash-looping controller usually means the one-time gcloud
+    # step above has not been run (driver log: "Gaia id not found for email ...").
+    # Deployment Available is not enough: with maxUnavailable it stays True while the
+    # only replica of a single-node cluster is crash-looping.
     - extraDependencies:
         - apiVersion: policy.open-cluster-management.io/v1
           kind: ConfigurationPolicy
@@ -115,7 +118,9 @@ spec:
         spec:
           severity: medium
           remediationAction: inform
-          object-templates:
+          object-templates-raw: |
+            {{- $replicas := 1 }}
+            {{- with (lookup "apps/v1" "Deployment" "openshift-cluster-csi-drivers" "gcp-filestore-csi-driver-controller").spec }}{{ $replicas = .replicas }}{{ end }}
             - complianceType: musthave
               recordDiff: None
               objectDefinition:
@@ -132,6 +137,4 @@ spec:
                   name: gcp-filestore-csi-driver-controller
                   namespace: openshift-cluster-csi-drivers
                 status:
-                  conditions:
-                    - type: Available
-                      status: "True"
+                  readyReplicas: {{ $replicas }}
