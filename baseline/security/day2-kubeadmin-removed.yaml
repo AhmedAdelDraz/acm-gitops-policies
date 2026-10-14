@@ -11,6 +11,14 @@ spec:
   # No policy-level remediationAction: the safety check stays inform, the
   # removal is enforced.
   disabled: false
+  # kubeadmin is only removed once the htpasswd identity provider and ocpadmin are in
+  # place and the OAuth server has rolled them out.
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: day2-htpasswd-identity-provider
+      namespace: rhacm-policies
+      compliance: Compliant
   policy-templates:
     # Removing kubeadmin cannot be undone, so it only happens on clusters where
     # someone else can still log in as an administrator: at least one identity

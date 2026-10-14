@@ -6,7 +6,8 @@ Platform hardening applied to every OpenShift cluster.
 |---|---|---|
 | `day2-etcd-encryption` | enforce | `APIServer/cluster` `spec.encryption.type: aescbc`: Secrets, ConfigMaps, Routes, OAuth tokens and other sensitive resources are encrypted at rest in etcd. |
 | `day2-disable-self-provisioner` | enforce | Removes the rules of the `self-provisioner` ClusterRole and the subjects of the `self-provisioners` binding, with `autoupdate: "false"` so the API server does not restore them. Regular users can no longer create projects. |
-| `day2-kubeadmin-removed` | enforce (guarded) | Deletes `kube-system/kubeadmin` **only if** an identity provider is configured **and** a non-system User or Group is bound to `cluster-admin`. Otherwise the inform check `kubeadmin-removal-prerequisites` is NonCompliant and names the missing prerequisite (`missing-identity-provider-…` or `missing-cluster-admin-user-…`), and kubeadmin is kept. |
+| `day2-htpasswd-identity-provider` | enforce | HTPasswd identity provider `htpasswd` (users file `openshift-config/htpasswd-users`, copied from the hub Secret `rhacm-policies/htpasswd-users`) and `ClusterRoleBinding/ocpadmin-cluster-admin`. An inform check reports when the `authentication` operator has rolled it out. |
+| `day2-kubeadmin-removed` | enforce (guarded) | Depends on `day2-htpasswd-identity-provider`. Deletes `kube-system/kubeadmin` **only if** an identity provider is configured **and** a non-system User or Group is bound to `cluster-admin`. Otherwise the inform check `kubeadmin-removal-prerequisites` is NonCompliant and names the missing prerequisite (`missing-identity-provider-…` or `missing-cluster-admin-user-…`), and kubeadmin is kept. |
 | `day2-oauth-token-duration` | enforce | `OAuth/cluster` `accessTokenMaxAgeSeconds: 3600`: OAuth access tokens expire after 1 hour (default 24h). |
 | `day2-default-network-policies` | enforce | Namespace isolation for every application namespace (see below). |
 
@@ -21,6 +22,33 @@ Platform hardening applied to every OpenShift cluster.
 - **1-hour tokens:** `oc login` sessions, and tools that store a user token,
   must log in again every hour. Use ServiceAccount tokens for automation.
   Existing tokens keep their original lifetime.
+
+## HTPasswd users (hub Secret)
+
+The users file is kept out of Git. Create it once on the hub, in the policy
+namespace, with bcrypt hashes; the policy copies it (encrypted by ACM in
+transit) to every cluster it is placed on:
+
+```bash
+htpasswd -cbB users.htpasswd ocpadmin '<password>'      # -c only for a new file
+oc create secret generic htpasswd-users -n rhacm-policies \
+  --from-file=htpasswd=users.htpasswd --dry-run=client -o yaml | oc apply -f -
+rm users.htpasswd
+```
+
+To add or change a user, rebuild the file with all users (or extract it with
+`oc extract secret/htpasswd-users -n rhacm-policies --to=-`), update the Secret,
+and the policy pushes it on its next evaluation. Only `ocpadmin` is bound to
+`cluster-admin`; other users get the default role.
+
+Without the hub Secret the policy is NonCompliant and kubeadmin is kept.
+
+**Before kubeadmin is removed,** log in once as ocpadmin and check the role:
+
+```bash
+oc login -u ocpadmin <api-url>
+oc auth can-i '*' '*' --all-namespaces    # yes
+```
 
 ## Default network policies
 
