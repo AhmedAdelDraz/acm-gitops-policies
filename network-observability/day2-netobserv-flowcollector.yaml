@@ -1,13 +1,21 @@
-# Network Observability with the smallest Loki setup, on clusters that run the
-# Multicloud Object Gateway (NooBaa, part of ODF).
+# Network Observability with the smallest Loki setup. Loki object storage is:
 #
-# Everything cluster specific is discovered on the managed cluster:
-#   - Loki object storage: an ObjectBucketClaim on the openshift-storage.noobaa.io
-#     StorageClass; the bucket credentials and endpoint come from the Secret and
-#     ConfigMap that MCG generates for the claim.
-#   - S3 TLS: the endpoint is the in-cluster s3.openshift-storage.svc, whose
-#     certificate is signed by the service CA; it is injected into loki-s3-ca.
-#   - Loki PVCs: the cluster's default StorageClass.
+# - On OpenShift on GCP with Workload Identity Federation: a Google Cloud Storage
+#   bucket named <GCP project ID>-<infrastructure name>-loki, reached with
+#   short-lived credentials. The Loki Operator (WIF settings in
+#   day2-netobserv-operators) asks the CCO for them; the CCO writes
+#   netobserv/loki-managed-credentials for the GCP service account
+#   openshift-loki@<project ID>.iam.gserviceaccount.com. The bucket, that
+#   service account and its IAM bindings are created once with gcloud, see
+#   network-observability/README.md.
+# - Everywhere else: the Multicloud Object Gateway (NooBaa, part of ODF). An
+#   ObjectBucketClaim on the openshift-storage.noobaa.io StorageClass; bucket
+#   credentials and endpoint come from the Secret and ConfigMap MCG generates for
+#   the claim. The endpoint is the in-cluster s3.openshift-storage.svc, with a
+#   certificate signed by the service CA, injected into loki-s3-ca.
+#
+# GCP is detected from the WIF audience in the CCO-managed ingress operator
+# credentials. Loki PVCs use the cluster's default StorageClass.
 #
 # No policy-level remediationAction: the "-ready" templates only check status and
 # stay inform, everything else is enforced.
@@ -80,7 +88,23 @@ spec:
         spec:
           severity: medium
           remediationAction: enforce
-          object-templates:
+          object-templates-raw: |
+            {{- $gcs := "" }}
+            {{- with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}
+            {{- with (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status }}{{ $gcs = printf "%s-%s-loki" .platformStatus.gcp.projectID .infrastructureName }}{{ end }}
+            {{- end }}{{ end }}{{ end }}
+            {{- if $gcs }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: loki-gcs
+                  namespace: netobserv
+                type: Opaque
+                data:
+                  bucketname: {{ $gcs | base64enc }}
+            {{- else }}
             - complianceType: musthave
               objectDefinition:
                 apiVersion: objectbucket.io/v1alpha1
@@ -100,6 +124,7 @@ spec:
                   namespace: netobserv
                   annotations:
                     service.beta.openshift.io/inject-cabundle: "true"
+            {{- end }}
     - extraDependencies:
         - apiVersion: policy.open-cluster-management.io/v1
           kind: ConfigurationPolicy
@@ -113,7 +138,21 @@ spec:
         spec:
           severity: medium
           remediationAction: inform
-          object-templates:
+          object-templates-raw: |
+            {{- $gcs := "" }}
+            {{- with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}
+            {{- with (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status }}{{ $gcs = printf "%s-%s-loki" .platformStatus.gcp.projectID .infrastructureName }}{{ end }}
+            {{- end }}{{ end }}{{ end }}
+            {{- if $gcs }}
+            - complianceType: musthave
+              recordDiff: None
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: loki-gcs
+                  namespace: netobserv
+            {{- else }}
             - complianceType: musthave
               objectDefinition:
                 apiVersion: objectbucket.io/v1alpha1
@@ -123,6 +162,7 @@ spec:
                   namespace: netobserv
                 status:
                   phase: Bound
+            {{- end }}
     # The claim's Secret and ConfigMap share its name. fromSecret already returns
     # base64; ConfigMap values are encoded here.
     - extraDependencies:
@@ -138,7 +178,23 @@ spec:
         spec:
           severity: medium
           remediationAction: enforce
-          object-templates:
+          object-templates-raw: |
+            {{- $gcs := "" }}
+            {{- with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}
+            {{- with (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status }}{{ $gcs = printf "%s-%s-loki" .platformStatus.gcp.projectID .infrastructureName }}{{ end }}
+            {{- end }}{{ end }}{{ end }}
+            {{- if $gcs }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: loki-gcs
+                  namespace: netobserv
+                type: Opaque
+                data:
+                  bucketname: {{ $gcs | base64enc }}
+            {{- else }}
             - complianceType: musthave
               objectDefinition:
                 apiVersion: v1
@@ -152,6 +208,7 @@ spec:
                   access_key_secret: '{{ fromSecret "netobserv" "loki-netobserv" "AWS_SECRET_ACCESS_KEY" }}'
                   bucketnames: '{{ fromConfigMap "netobserv" "loki-netobserv" "BUCKET_NAME" | base64enc }}'
                   endpoint: '{{ printf "https://%s:%s" (fromConfigMap "netobserv" "loki-netobserv" "BUCKET_HOST") (fromConfigMap "netobserv" "loki-netobserv" "BUCKET_PORT") | base64enc }}'
+            {{- end }}
     # 1x.demo is the smallest LokiStack size (single replica of each component,
     # not for production).
     - extraDependencies:
@@ -168,6 +225,10 @@ spec:
           severity: medium
           remediationAction: enforce
           object-templates-raw: |
+            {{- $gcs := "" }}
+            {{- with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}
+            {{- with (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status }}{{ $gcs = printf "%s-%s-loki" .platformStatus.gcp.projectID .infrastructureName }}{{ end }}
+            {{- end }}{{ end }}{{ end }}
             {{- $sc := "" }}
             {{- range $s := (lookup "storage.k8s.io/v1" "StorageClass" "" "").items }}
             {{- range $k, $v := $s.metadata.annotations }}{{ if and (eq $k "storageclass.kubernetes.io/is-default-class") (eq $v "true") }}{{ $sc = $s.metadata.name }}{{ end }}{{ end }}
@@ -185,12 +246,18 @@ spec:
                     schemas:
                       - version: v13
                         effectiveDate: "2024-10-01"
+                    {{- if $gcs }}
+                    secret:
+                      name: loki-gcs
+                      type: gcs
+                    {{- else }}
                     secret:
                       name: loki-s3
                       type: s3
                     tls:
                       caName: loki-s3-ca
                       caKey: service-ca.crt
+                    {{- end }}
                   storageClassName: {{ $sc }}
                   tenants:
                     mode: openshift-network

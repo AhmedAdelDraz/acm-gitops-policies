@@ -77,6 +77,22 @@ spec:
             channel: stable-6.6
             source: redhat-operators
             sourceNamespace: openshift-marketplace
+            # On OpenShift on GCP with Workload Identity Federation these make the
+            # operator request short-lived GCS credentials from the CCO for each
+            # LokiStack; elsewhere they are empty and the operator uses the storage
+            # secret as is. Values are split out of the WIF audience in the CCO-managed
+            # ingress operator credentials:
+            #   //iam.googleapis.com/projects/<4: number>/locations/global/workloadIdentityPools/<8: pool>/providers/<10: provider>
+            config:
+              env:
+                - name: PROJECT_NUMBER
+                  value: '{{ with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}{{ index (splitList "/" .) 4 }}{{ end }}{{ end }}{{ end }}'
+                - name: POOL_ID
+                  value: '{{ with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}{{ index (splitList "/" .) 8 }}{{ end }}{{ end }}{{ end }}'
+                - name: PROVIDER_ID
+                  value: '{{ with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}{{ index (splitList "/" .) 10 }}{{ end }}{{ end }}{{ end }}'
+                - name: SERVICE_ACCOUNT_EMAIL
+                  value: '{{ with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}openshift-loki@{{ (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.platformStatus.gcp.projectID }}.iam.gserviceaccount.com{{ end }}{{ end }}{{ end }}'
           upgradeApproval: Automatic
     - extraDependencies:
         - apiVersion: policy.open-cluster-management.io/v1

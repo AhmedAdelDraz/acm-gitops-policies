@@ -23,7 +23,7 @@ acm-gitops-policies/   (repository root)
 │   └── cluster-settings/           # console banner, telemetry opt-out, update channel check
 ├── gcp-logging/                    # cluster-specific: cloud=Google
 ├── gcp-storage/                    # cluster-specific: cloud=Google (Filestore RWX storage)
-└── network-observability/          # cluster-specific: opt-in label network-observability=enabled
+└── network-observability/          # cluster-specific: opt-in label network-observability=enabled (Loki on GCS on GCP, MCG elsewhere)
 ```
 
 | Group | PolicySet | Targets | README |
