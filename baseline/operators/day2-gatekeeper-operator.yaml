@@ -58,7 +58,9 @@ spec:
                     logLevel: INFO
                   validatingWebhook: Enabled
                   mutatingWebhook: Disabled
+                  # One webhook pod per node across the 3 infra nodes; some Gatekeeper
+                  # webhooks use failurePolicy Fail, so admission must survive a node loss.
                   webhook:
-                    replicas: 2
+                    replicas: 3
                     logLevel: INFO
                     emitAdmissionEvents: Disabled

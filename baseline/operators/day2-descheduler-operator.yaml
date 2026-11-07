@@ -83,5 +83,10 @@ spec:
                   managementState: Managed
                   mode: Predictive
                   deschedulingIntervalSeconds: 3600
+                  # TopologyAndDuplicates evicts pods that break a hard topology
+                  # spread or share a node with another replica of the same owner,
+                  # e.g. image-registry left with 2 pods on one infra node after a
+                  # rollout. Only useful with more than one schedulable node.
                   profiles:
                     - AffinityAndTaints
+                    - TopologyAndDuplicates

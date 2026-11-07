@@ -8,7 +8,14 @@ ReadWriteOnce block storage needs no policy: OpenShift on GCP ships the
 Persistent Disk CSI driver (`pd.csi.storage.gke.io`) with the `standard-csi`
 (default) and `ssd-csi` StorageClasses.
 
-**Targets** clusters labelled `vendor=OpenShift` and `cloud=Google`. Supported
+**Opt-in:** not deployed by default. **Targets** clusters labelled
+`vendor=OpenShift`, `cloud=Google` and `gcp-filestore=enabled`:
+
+```
+oc label managedcluster <cluster> gcp-filestore=enabled
+```
+
+ Supported
 only on OpenShift on GCP **installed with WIF** (Cloud Credential Operator in
 Manual mode). Do not place it on a key-based GCP cluster.
 
@@ -86,10 +93,16 @@ need ReadWriteMany.
 
 ## Current setup
 
-Deployed on the GCP SNO lab (`local-cluster`, OpenShift 4.22, WIF):
-operator installed, WIF credentials issued by the CCO, driver and
-`filestore-csi` StorageClass created, and the GCP STS token exchange accepted
-the cluster's token. Volume provisioning waits for the GCP prerequisite above.
+**Not deployed.** `local-cluster` does not carry the `gcp-filestore=enabled`
+label. On the rebuilt 3+3 hub the GCP service account
+`openshift-filestore-csi@<project>` did not exist, so the driver controller
+crash-looped; create it (header of `day2-gcp-filestore-driver.yaml`) before
+opting a cluster in.
+
+Removing the label, or never adding it, does not uninstall anything the
+policies already created (they do not set `pruneObjectBehavior`): the operator,
+the `ClusterCSIDriver` and the `filestore-csi` StorageClass stay until deleted
+by hand.
 
 ## Required changes for 3 infra nodes
 
