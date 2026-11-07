@@ -39,6 +39,13 @@ Create them with `gcloud`; the exact commands are in the header of
 Clusters sharing a project share the service account; each cluster only adds
 its own workloadIdentityUser binding.
 
+**With `ccoctl` instead:** see [docs/gcp-wif-ccoctl.md](../docs/gcp-wif-ccoctl.md).
+`ccoctl` generates the service account name, so its email is handed to the
+policy through key `<cluster>.logging` of the hub ConfigMap
+`rhacm-policies/gcp-wif-service-accounts`; without that key the policy uses
+`openshift-logging-writer@<project ID>`. After the service account changes,
+restart the collector pods: they cache a failed token exchange.
+
 **Verify:**
 
 ```

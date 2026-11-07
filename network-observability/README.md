@@ -102,6 +102,12 @@ for KSA in loki loki-ruler; do
 done
 ```
 
+**With `ccoctl` instead:** see [docs/gcp-wif-ccoctl.md](../docs/gcp-wif-ccoctl.md).
+`ccoctl` generates the service account name, so its email is handed to the
+Loki Operator through key `<cluster>.loki` of the hub ConfigMap
+`rhacm-policies/gcp-wif-service-accounts`; without that key the policy uses
+`openshift-loki@<project ID>`. `ccoctl` does not create the bucket.
+
 Until this is done every policy is Compliant and the LokiStack is Ready, but
 the ingester cannot flush flows to the bucket (`Gaia id not found for email
 openshift-loki@...` or a 403 in `oc logs -n netobserv loki-ingester-0`), and

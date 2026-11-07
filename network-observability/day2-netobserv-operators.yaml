@@ -91,8 +91,11 @@ spec:
                   value: '{{ with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}{{ index (splitList "/" .) 8 }}{{ end }}{{ end }}{{ end }}'
                 - name: PROVIDER_ID
                   value: '{{ with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}{{ index (splitList "/" .) 10 }}{{ end }}{{ end }}{{ end }}'
+                # GCP service account: key "<cluster>.loki" of the hub ConfigMap
+                # rhacm-policies/gcp-wif-service-accounts when set (the random name
+                # ccoctl generates), otherwise openshift-loki@<project ID>.
                 - name: SERVICE_ACCOUNT_EMAIL
-                  value: '{{ with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}openshift-loki@{{ (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.platformStatus.gcp.projectID }}.iam.gserviceaccount.com{{ end }}{{ end }}{{ end }}'
+                  value: '{{ with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}{{ $sa := "{{hub with (lookup "v1" "ConfigMap" "rhacm-policies" "gcp-wif-service-accounts").data hub}}{{hub dig (printf "%s.loki" $.ManagedClusterName) "" . hub}}{{hub end hub}}" }}{{ if not $sa }}{{ $sa = printf "openshift-loki@%s.iam.gserviceaccount.com" (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.platformStatus.gcp.projectID }}{{ end }}{{ $sa }}{{ end }}{{ end }}{{ end }}'
           upgradeApproval: Automatic
     - extraDependencies:
         - apiVersion: policy.open-cluster-management.io/v1
