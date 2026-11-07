@@ -22,7 +22,6 @@ acm-gitops-policies/   (repository root)
 │   ├── infrastructure/             # infra MCP; ingress, monitoring, registry on infra nodes
 │   └── cluster-settings/           # console banner, telemetry opt-out, update channel check
 ├── gcp-logging/                    # cluster-specific: cloud=Google
-├── gcp-storage/                    # cluster-specific: cloud=Google (Filestore RWX storage)
 └── network-observability/          # cluster-specific: opt-in label network-observability=enabled (Loki on GCS on GCP, MCG elsewhere)
 ```
 
@@ -35,7 +34,6 @@ acm-gitops-policies/   (repository root)
 | Infrastructure | `baseline-infrastructure` | all OpenShift clusters | [baseline/infrastructure](baseline/infrastructure/README.md) |
 | Cluster settings | `baseline-cluster-settings` | all OpenShift clusters | [baseline/cluster-settings](baseline/cluster-settings/README.md) |
 | GCP logging | `openshift-gcp-logging` | `vendor=OpenShift`, `cloud=Google` | [gcp-logging](gcp-logging/README.md) |
-| GCP storage | `openshift-gcp-storage` | `vendor=OpenShift`, `cloud=Google`, `gcp-filestore=enabled` (opt-in) | [gcp-storage](gcp-storage/README.md) |
 | Network Observability | `openshift-network-observability` | `vendor=OpenShift`, `network-observability=enabled` | [network-observability](network-observability/README.md) |
 
 ## Conventions
@@ -111,7 +109,6 @@ policies are applied:
 | Infrastructure | infra MCP gets the nodes; 3 router replicas on infra; monitoring on infra; registry on infra | registry stays at 1 replica on a ReadWriteOnce PVC: move it to object storage for 3 replicas |
 | Network Observability | — | LokiStack `1x.demo` → `1x.pico` or larger; tolerations for the eBPF agent and flowlogs-pipeline; optionally Loki on infra |
 | GCP logging | — | collector must tolerate the infra taint |
-| GCP storage | Filestore node driver tolerates all taints | none |
 | Compliance | ScanSetting `pci-dss` adds the `infra` role when infra nodes lack the worker label | none |
 | Operators | Gatekeeper webhook runs 3 replicas; Descheduler also reports topology/duplicate violations | Descheduler: switch to `Automatic` after reviewing the Predictive results |
 | Security, Pipelines, Cluster settings | no change | none |
@@ -129,7 +126,6 @@ was validated with these policies on 2026-11-07:
 - Routers (3), monitoring, image registry (3 replicas on GCS), Pipelines,
   Gatekeeper and GitOps run on the infra nodes; the GCP logging collector and
   the Persistent Disk CSI node driver run on all 6 nodes.
-- GCP storage (Filestore) is opt-in and not deployed on this hub.
 - PCI-DSS node scans previously covered only the masters, because the
   `default` ScanSetting scans `master` and `worker`. The `pci-dss` ScanSetting
   now adds `infra`.
