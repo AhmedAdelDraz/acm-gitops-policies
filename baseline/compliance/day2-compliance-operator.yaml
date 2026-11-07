@@ -58,16 +58,63 @@ spec:
             source: redhat-operators
             sourceNamespace: openshift-marketplace
           upgradeApproval: Automatic
-    # PCI-DSS v4.0 is the profile set that fits the banking sector: the platform
-    # profile checks cluster configuration, the node profile checks every node.
-    # The "default" ScanSetting scans master and worker nodes daily at 01:00 and
-    # keeps raw results on a PVC from the default StorageClass. Remediations are
-    # not applied automatically; review them first (many trigger node reboots).
-    # Results are reported by day2-compliance-pci-dss-results.
+    # Node scans run per MachineConfigPool role. The "default" ScanSetting only
+    # scans master and worker, so infra nodes that do not also carry the worker
+    # label (3 masters + 3 infra, no workers) would never be scanned. The roles
+    # are therefore taken from the nodes each cluster actually has. Every other
+    # field matches the "default" ScanSetting: daily at 01:00, scanner tolerates
+    # all taints, raw results on a 1Gi PVC from the default StorageClass.
     - extraDependencies:
         - apiVersion: policy.open-cluster-management.io/v1beta1
           kind: OperatorPolicy
           name: install-compliance-operator
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: compliance-pci-dss-scansetting
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- $roles := list "master" }}
+            {{- if gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/worker").items) 0 }}{{ $roles = append $roles "worker" }}{{ end }}
+            {{- if gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra" "!node-role.kubernetes.io/worker").items) 0 }}{{ $roles = append $roles "infra" }}{{ end }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: compliance.openshift.io/v1alpha1
+                kind: ScanSetting
+                metadata:
+                  name: pci-dss
+                  namespace: openshift-compliance
+                roles: {{ $roles | toRawJson }}
+                schedule: "0 1 * * *"
+                timeout: 30m
+                maxRetryOnTimeout: 3
+                strictNodeScan: true
+                showNotApplicable: false
+                scanTolerations:
+                  - operator: Exists
+                rawResultStorage:
+                  size: 1Gi
+                  rotation: 3
+                  pvAccessModes:
+                    - ReadWriteOnce
+                  nodeSelector:
+                    node-role.kubernetes.io/master: ""
+                  tolerations:
+                    - key: node-role.kubernetes.io/master
+                      operator: Exists
+                      effect: NoSchedule
+    # PCI-DSS v4.0 is the profile set that fits the banking sector: the platform
+    # profile checks cluster configuration, the node profile checks every node.
+    # Remediations are not applied automatically; review them first (many trigger
+    # node reboots). Results are reported by day2-compliance-pci-dss-results.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: compliance-pci-dss-scansetting
           compliance: Compliant
       objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
@@ -95,4 +142,4 @@ spec:
                 settingsRef:
                   apiGroup: compliance.openshift.io/v1alpha1
                   kind: ScanSetting
-                  name: default
+                  name: pci-dss

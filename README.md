@@ -35,7 +35,7 @@ acm-gitops-policies/   (repository root)
 | Infrastructure | `baseline-infrastructure` | all OpenShift clusters | [baseline/infrastructure](baseline/infrastructure/README.md) |
 | Cluster settings | `baseline-cluster-settings` | all OpenShift clusters | [baseline/cluster-settings](baseline/cluster-settings/README.md) |
 | GCP logging | `openshift-gcp-logging` | `vendor=OpenShift`, `cloud=Google` | [gcp-logging](gcp-logging/README.md) |
-| GCP storage | `openshift-gcp-storage` | `vendor=OpenShift`, `cloud=Google` | [gcp-storage](gcp-storage/README.md) |
+| GCP storage | `openshift-gcp-storage` | `vendor=OpenShift`, `cloud=Google`, `gcp-filestore=enabled` (opt-in) | [gcp-storage](gcp-storage/README.md) |
 | Network Observability | `openshift-network-observability` | `vendor=OpenShift`, `network-observability=enabled` | [network-observability](network-observability/README.md) |
 
 ## Conventions
@@ -93,7 +93,9 @@ policies are applied:
    oc label node <infra-node> node-role.kubernetes.io/infra=""
    ```
 2. **Taint them** so only infrastructure workloads run there (this also keeps
-   them out of OpenShift subscription counts):
+   them out of OpenShift subscription counts). **Only when the cluster also has
+   worker nodes**: with no workers and tainted masters, the infra nodes are the
+   only place general workloads (Pipelines, Gatekeeper, GitOps, ACM) can run.
    ```
    oc adm taint node <infra-node> node-role.kubernetes.io/infra=reserved:NoSchedule
    ```
@@ -110,9 +112,32 @@ policies are applied:
 | Network Observability | — | LokiStack `1x.demo` → `1x.pico` or larger; tolerations for the eBPF agent and flowlogs-pipeline; optionally Loki on infra |
 | GCP logging | — | collector must tolerate the infra taint |
 | GCP storage | Filestore node driver tolerates all taints | none |
-| Compliance | node scans keep working (scanner tolerates all taints) | optional: add the `infra` role to the ScanSetting |
-| Operators | — | Descheduler: consider `Automatic` mode and more profiles |
+| Compliance | ScanSetting `pci-dss` adds the `infra` role when infra nodes lack the worker label | none |
+| Operators | Gatekeeper webhook runs 3 replicas; Descheduler also reports topology/duplicate violations | Descheduler: switch to `Automatic` after reviewing the Predictive results |
 | Security, Pipelines, Cluster settings | no change | none |
 
-The single-node limit of 250 pods per node, which currently blocks the PCI-DSS
-scan on the hub, does not apply to a multi-node cluster in the same way.
+### Current hub: 3 control-plane + 3 infra nodes, no workers
+
+`local-cluster` (OpenShift 4.22 on GCP, one node per zone in us-central1-a/b/c)
+was validated with these policies on 2026-11-07:
+
+- masters are tainted `NoSchedule` (`mastersSchedulable: false`); the infra
+  nodes carry only `node-role.kubernetes.io/infra` and are **not tainted**, so
+  every non-control-plane workload runs on them. Do not taint them unless
+  worker nodes are added first.
+- MachineConfigPools: `master` 3/3, `infra` 3/3, `worker` 0, all updated.
+- Routers (3), monitoring, image registry (3 replicas on GCS), Pipelines,
+  Gatekeeper and GitOps run on the infra nodes; the GCP logging collector and
+  the Persistent Disk CSI node driver run on all 6 nodes.
+- GCP storage (Filestore) is opt-in and not deployed on this hub.
+- PCI-DSS node scans previously covered only the masters, because the
+  `default` ScanSetting scans `master` and `worker`. The `pci-dss` ScanSetting
+  now adds `infra`.
+
+Still NonCompliant, and not fixable from Git:
+
+| Policy | Cause | Fix |
+|---|---|---|
+| `day2-htpasswd-identity-provider` | hub Secret `rhacm-policies/htpasswd-users` is missing | create it (see `baseline/security/README.md`) |
+| `day2-kubeadmin-removed` | waits for the policy above | none; it removes `kubeadmin` once htpasswd login works |
+| `day2-compliance-pci-dss-results` | report-only: lists failed PCI-DSS checks | remediate or accept the checks |

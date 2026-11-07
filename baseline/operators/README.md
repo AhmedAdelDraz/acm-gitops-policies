@@ -4,8 +4,8 @@ Day-2 platform operators installed on every cluster.
 
 | Policy | Mode | What it does |
 |---|---|---|
-| `day2-gatekeeper-operator` | enforce | Gatekeeper Operator (`gatekeeper-operator-product`, `redhat-operators`) in `openshift-operators`, then a `Gatekeeper` instance: audit 1 replica, validating webhook on (2 replicas), **mutating webhook off**. |
-| `day2-descheduler-operator` | enforce | Kube Descheduler Operator in `openshift-kube-descheduler-operator`, then `KubeDescheduler/cluster`: mode **`Predictive`** (evaluates and reports evictions, evicts nothing), profile `AffinityAndTaints`, every 3600s. |
+| `day2-gatekeeper-operator` | enforce | Gatekeeper Operator (`gatekeeper-operator-product`, `redhat-operators`) in `openshift-operators`, then a `Gatekeeper` instance: audit 1 replica, validating webhook on (3 replicas), **mutating webhook off**. |
+| `day2-descheduler-operator` | enforce | Kube Descheduler Operator in `openshift-kube-descheduler-operator`, then `KubeDescheduler/cluster`: mode **`Predictive`** (evaluates and reports evictions, evicts nothing), profiles `AffinityAndTaints` and `TopologyAndDuplicates`, every 3600s. |
 
 ## Gatekeeper
 
@@ -28,16 +28,15 @@ oc get <kind> <name> -o jsonpath='{.status.violations}'
 
 ## Required changes for 3 infra nodes
 
-- **Gatekeeper:** no change is required. Its pods belong on worker nodes, not
-  infra nodes. For webhook availability across node failures, consider
-  `webhook.replicas: 3`.
-- **Descheduler:** on a single node there is nowhere to move pods, so the
-  descheduler has no effect on the current hub. On a multi-node cluster it
-  becomes useful:
+- **Gatekeeper:** the webhook runs **3 replicas**, one per node on the 3
+  schedulable nodes. Some Gatekeeper webhooks use `failurePolicy: Fail`, so
+  admission must survive the loss of a node. Its pods belong on worker nodes;
+  on the current hub (no workers) they run on the infra nodes.
+- **Descheduler:** `TopologyAndDuplicates` reports pods that break a hard
+  topology spread constraint or share a node with another replica of the same
+  owner. On the hub it flags the image registry, which a rollout left with 2
+  of its 3 pods on one infra node. It still evicts nothing in `Predictive`
+  mode:
   - after reviewing the Predictive results, set `mode: Automatic`;
-  - consider adding `LifecycleAndUtilization` to `profiles` to rebalance
-    workers;
-  - `AffinityAndTaints` already evicts pods that violate the infra taint, for
-    example workloads left on the new infra nodes after they were tainted.
-  Workloads tolerating the infra taint (routers, monitoring, registry) are not
-  affected.
+  - `AffinityAndTaints` evicts pods that violate taints or node affinity, for
+    example workloads left on infra nodes after they were tainted.
