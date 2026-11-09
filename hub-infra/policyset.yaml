@@ -1,0 +1,9 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: hub-infra
+  namespace: rhacm-policies
+spec:
+  description: Hub services (ACM, multicluster engine, klusterlet agents, GitOps) on infra nodes
+  policies:
+    - day2-hub-services-infra

@@ -57,6 +57,17 @@ spec:
             namespace: openshift-logging
             source: redhat-operators
             sourceNamespace: openshift-marketplace
+            config:
+              # Infra nodes when the cluster has any; tolerates every NoSchedule and
+              # PreferNoSchedule taint and any node-role.kubernetes.io/infra taint.
+              nodeSelector: '{{ if gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items) 0 }}{{ dict "node-role.kubernetes.io/infra" "" | toRawJson | toLiteral }}{{ else }}{{ dict | toRawJson | toLiteral }}{{ end }}'
+              tolerations:
+                - operator: Exists
+                  effect: NoSchedule
+                - operator: Exists
+                  effect: PreferNoSchedule
+                - key: node-role.kubernetes.io/infra
+                  operator: Exists
           upgradeApproval: Automatic
     - extraDependencies:
         - apiVersion: policy.open-cluster-management.io/v1
@@ -77,4 +88,15 @@ spec:
             namespace: openshift-cluster-observability-operator
             source: redhat-operators
             sourceNamespace: openshift-marketplace
+            config:
+              # Infra nodes when the cluster has any; tolerates every NoSchedule and
+              # PreferNoSchedule taint and any node-role.kubernetes.io/infra taint.
+              nodeSelector: '{{ if gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items) 0 }}{{ dict "node-role.kubernetes.io/infra" "" | toRawJson | toLiteral }}{{ else }}{{ dict | toRawJson | toLiteral }}{{ end }}'
+              tolerations:
+                - operator: Exists
+                  effect: NoSchedule
+                - operator: Exists
+                  effect: PreferNoSchedule
+                - key: node-role.kubernetes.io/infra
+                  operator: Exists
           upgradeApproval: Automatic

@@ -84,6 +84,16 @@ spec:
             # ingress operator credentials:
             #   //iam.googleapis.com/projects/<4: number>/locations/global/workloadIdentityPools/<8: pool>/providers/<10: provider>
             config:
+              # Operator pod: infra nodes when the cluster has any; tolerates every
+              # NoSchedule and PreferNoSchedule taint and any node-role.kubernetes.io/infra taint.
+              nodeSelector: '{{ if gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items) 0 }}{{ dict "node-role.kubernetes.io/infra" "" | toRawJson | toLiteral }}{{ else }}{{ dict | toRawJson | toLiteral }}{{ end }}'
+              tolerations:
+                - operator: Exists
+                  effect: NoSchedule
+                - operator: Exists
+                  effect: PreferNoSchedule
+                - key: node-role.kubernetes.io/infra
+                  operator: Exists
               env:
                 - name: PROJECT_NUMBER
                   value: '{{ with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}{{ index (splitList "/" .) 4 }}{{ end }}{{ end }}{{ end }}'
@@ -118,4 +128,14 @@ spec:
             channel: stable
             source: redhat-operators
             sourceNamespace: openshift-marketplace
+            config:
+              # Same placement as the Loki Operator.
+              nodeSelector: '{{ if gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items) 0 }}{{ dict "node-role.kubernetes.io/infra" "" | toRawJson | toLiteral }}{{ else }}{{ dict | toRawJson | toLiteral }}{{ end }}'
+              tolerations:
+                - operator: Exists
+                  effect: NoSchedule
+                - operator: Exists
+                  effect: PreferNoSchedule
+                - key: node-role.kubernetes.io/infra
+                  operator: Exists
           upgradeApproval: Automatic

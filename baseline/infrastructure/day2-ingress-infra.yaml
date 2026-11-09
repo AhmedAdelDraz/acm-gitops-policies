@@ -16,6 +16,11 @@ spec:
     # infra nodes (for example single-node OpenShift) keep their current placement
     # and the policy is safe to enforce everywhere.
     #
+    # Tolerations: every NoSchedule and PreferNoSchedule taint, and any effect of the
+    # node-role.kubernetes.io/infra taint. Other NoExecute taints (for example
+    # node.kubernetes.io/unreachable) are not tolerated, so pods still move off a
+    # failed node.
+    #
     # musthave would merge the node selector into an existing one (for example
     # node-role.kubernetes.io/worker), which dedicated infra nodes would not match.
     # So the current spec is read back, nodePlacement and replicas are replaced,
@@ -36,7 +41,7 @@ spec:
             {{- $spec := dict }}
             {{- with (lookup "operator.openshift.io/v1" "IngressController" "openshift-ingress-operator" "default").spec }}{{ $spec = . }}{{ end }}
             {{- $_ := set $spec "replicas" $replicas }}
-            {{- $_ = set $spec "nodePlacement" (dict "nodeSelector" (dict "matchLabels" (dict "node-role.kubernetes.io/infra" "")) "tolerations" (list (dict "key" "node-role.kubernetes.io/infra" "operator" "Exists"))) }}
+            {{- $_ = set $spec "nodePlacement" (dict "nodeSelector" (dict "matchLabels" (dict "node-role.kubernetes.io/infra" "")) "tolerations" (list (dict "operator" "Exists" "effect" "NoSchedule") (dict "operator" "Exists" "effect" "PreferNoSchedule") (dict "key" "node-role.kubernetes.io/infra" "operator" "Exists"))) }}
             - complianceType: mustonlyhave
               metadataComplianceType: musthave
               objectDefinition:

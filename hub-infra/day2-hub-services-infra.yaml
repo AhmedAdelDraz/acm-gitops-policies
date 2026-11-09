@@ -1,0 +1,102 @@
+# Runs the hub's own infrastructure services on the infra nodes: ACM and the
+# multicluster engine (through the MultiClusterHub, which passes nodeSelector and
+# tolerations on to the MultiClusterEngine), the klusterlet agents of every managed
+# cluster (KlusterletConfig "global"), OpenShift GitOps (GitopsService), and the
+# operators of all three (OLM Subscription config).
+#
+# Tolerations: every NoSchedule and PreferNoSchedule taint, and any effect of the
+# node-role.kubernetes.io/infra taint. Other NoExecute taints (for example
+# node.kubernetes.io/unreachable) are not tolerated, so pods still move off a
+# failed node.
+#
+# Nothing is changed on a hub without infra nodes; the template then only checks
+# that the MultiClusterHub exists.
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-hub-services-infra
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: hub-services-infra
+        spec:
+          severity: medium
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- $infra := gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items) 0 }}
+            {{- $sel := dict "node-role.kubernetes.io/infra" "" }}
+            {{- $tol := list (dict "operator" "Exists" "effect" "NoSchedule") (dict "operator" "Exists" "effect" "PreferNoSchedule") (dict "key" "node-role.kubernetes.io/infra" "operator" "Exists") }}
+            {{- range (lookup "operator.open-cluster-management.io/v1" "MultiClusterHub" "" "").items }}
+            {{- if $infra }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.open-cluster-management.io/v1
+                kind: MultiClusterHub
+                metadata:
+                  name: {{ .metadata.name }}
+                  namespace: {{ .metadata.namespace }}
+                spec:
+                  nodeSelector: {{ $sel | toRawJson }}
+                  tolerations: {{ $tol | toRawJson }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.open-cluster-management.io/v1alpha1
+                kind: KlusterletConfig
+                metadata:
+                  name: global
+                spec:
+                  nodePlacement:
+                    nodeSelector: {{ $sel | toRawJson }}
+                    tolerations: {{ $tol | toRawJson }}
+            {{- else }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.open-cluster-management.io/v1
+                kind: MultiClusterHub
+                metadata:
+                  name: {{ .metadata.name }}
+                  namespace: {{ .metadata.namespace }}
+            {{- end }}
+            {{- end }}
+            {{- if $infra }}
+            {{- range $ns, $pkg := dict "open-cluster-management" "advanced-cluster-management" "multicluster-engine" "multicluster-engine" "openshift-gitops-operator" "openshift-gitops-operator" }}
+            {{- range (lookup "operators.coreos.com/v1alpha1" "Subscription" $ns "").items }}
+            {{- if eq .spec.name $pkg }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: {{ .metadata.name }}
+                  namespace: {{ .metadata.namespace }}
+                spec:
+                  config:
+                    nodeSelector: {{ $sel | toRawJson }}
+                    tolerations: {{ $tol | toRawJson }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- with (lookup "pipelines.openshift.io/v1alpha1" "GitopsService" "" "cluster") }}
+            {{- if .metadata }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: pipelines.openshift.io/v1alpha1
+                kind: GitopsService
+                metadata:
+                  name: cluster
+                spec:
+                  runOnInfra: true
+                  tolerations: {{ $tol | toRawJson }}
+            {{- end }}
+            {{- end }}
+            {{- end }}

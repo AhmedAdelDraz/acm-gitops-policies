@@ -151,6 +151,10 @@ spec:
                 spec:
                   serviceAccount:
                     name: logcollector
+                  # The collector is a DaemonSet: it runs on every node, whatever its taints.
+                  collector:
+                    tolerations:
+                      - operator: Exists
                   outputs:
                     - name: gcp-wif
                       type: googleCloudLogging

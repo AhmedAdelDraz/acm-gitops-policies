@@ -131,37 +131,12 @@ All changes are in `day2-netobserv-flowcollector.yaml`.
    size with replication factor 2 and replicated components, which needs at
    least 3 nodes. Use `1x.extra-small` for larger clusters or longer retention.
    Check that the default StorageClass can provide the larger PVCs.
-2. **eBPF agent and flowlogs-pipeline on every node, including infra nodes.**
-   In `Direct` mode both run as DaemonSets. If they don't tolerate the infra
-   taint, flows from the infra nodes (the routers) are missing. Add:
-   ```yaml
-   spec:
-     agent:
-       ebpf:
-         advanced:
-           scheduling:
-             tolerations:
-               - operator: Exists
-     processor:
-       advanced:
-         scheduling:
-           tolerations:
-             - operator: Exists
-   ```
-   Then check `oc get ds -n netobserv-privileged netobserv-ebpf-agent` and
+2. **Placement is automatic.** The eBPF agent and flowlogs-pipeline
+   (DaemonSets in `Direct` mode) tolerate every taint, so flows from the infra
+   nodes are collected. With infra nodes, every LokiStack component, the
+   console plugin and both operators run on them, tolerating every
+   `NoSchedule`/`PreferNoSchedule` taint and any `node-role.kubernetes.io/infra`
+   taint. Check `oc get ds -n netobserv-privileged netobserv-ebpf-agent` and
    `oc get ds -n netobserv flowlogs-pipeline`: DESIRED should equal the node count.
-3. **Optional: Loki on the infra nodes.** Add to the LokiStack, for each
-   component (`compactor`, `distributor`, `gateway`, `indexGateway`,
-   `ingester`, `querier`, `queryFrontend`, `ruler`):
-   ```yaml
-   spec:
-     template:
-       ingester:
-         nodeSelector:
-           node-role.kubernetes.io/infra: ""
-         tolerations:
-           - key: node-role.kubernetes.io/infra
-             operator: Exists
-   ```
-4. **Optional:** with more nodes there are more flows. Raise `sampling` (for
+3. **Optional:** with more nodes there are more flows. Raise `sampling` (for
    example to 100) if Loki or the agents use too much memory.

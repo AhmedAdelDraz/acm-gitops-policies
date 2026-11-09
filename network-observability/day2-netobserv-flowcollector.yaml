@@ -229,6 +229,7 @@ spec:
             {{- with (lookup "v1" "Secret" "openshift-ingress-operator" "cloud-credentials").data }}{{ with index . "service_account.json" }}{{ with (base64dec . | fromJson).audience }}
             {{- with (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status }}{{ $gcs = printf "%s-%s-loki" .platformStatus.gcp.projectID .infrastructureName }}{{ end }}
             {{- end }}{{ end }}{{ end }}
+            {{- $infra := gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items) 0 }}
             {{- $sc := "" }}
             {{- range $s := (lookup "storage.k8s.io/v1" "StorageClass" "" "").items }}
             {{- range $k, $v := $s.metadata.annotations }}{{ if and (eq $k "storageclass.kubernetes.io/is-default-class") (eq $v "true") }}{{ $sc = $s.metadata.name }}{{ end }}{{ end }}
@@ -261,6 +262,23 @@ spec:
                   storageClassName: {{ $sc }}
                   tenants:
                     mode: openshift-network
+                  {{- if $infra }}
+                  # Every Loki component on the infra nodes, tolerating every NoSchedule and
+                  # PreferNoSchedule taint and any node-role.kubernetes.io/infra taint.
+                  template:
+                    {{- range list "compactor" "distributor" "gateway" "indexGateway" "ingester" "querier" "queryFrontend" "ruler" }}
+                    {{ . }}:
+                      nodeSelector:
+                        node-role.kubernetes.io/infra: ""
+                      tolerations:
+                        - operator: Exists
+                          effect: NoSchedule
+                        - operator: Exists
+                          effect: PreferNoSchedule
+                        - key: node-role.kubernetes.io/infra
+                          operator: Exists
+                    {{- end }}
+                  {{- end }}
     # 1x.demo runs a single ingester, so the operator keeps a replication-factor
     # warning on the LokiStack; that is expected for this size and does not
     # affect Ready.
@@ -327,6 +345,17 @@ spec:
                         - PacketDrop
                         - DNSTracking
                         - FlowRTT
+                      # Node agent (DaemonSet): runs on every node, whatever its taints.
+                      advanced:
+                        scheduling:
+                          tolerations:
+                            - operator: Exists
+                  # In the Direct model flowlogs-pipeline is a DaemonSet as well.
+                  processor:
+                    advanced:
+                      scheduling:
+                        tolerations:
+                          - operator: Exists
                   loki:
                     enable: true
                     mode: LokiStack
@@ -334,6 +363,17 @@ spec:
                       name: loki
                   consolePlugin:
                     enable: true
+                    # Infra nodes when the cluster has any.
+                    advanced:
+                      scheduling:
+                        nodeSelector: '{{ if gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items) 0 }}{{ dict "node-role.kubernetes.io/infra" "" | toRawJson | toLiteral }}{{ else }}{{ dict | toRawJson | toLiteral }}{{ end }}'
+                        tolerations:
+                          - operator: Exists
+                            effect: NoSchedule
+                          - operator: Exists
+                            effect: PreferNoSchedule
+                          - key: node-role.kubernetes.io/infra
+                            operator: Exists
     # Reports NonCompliant until every FlowCollector component is up, so the
     # policy status reflects a working stack and not just created objects.
     - extraDependencies:

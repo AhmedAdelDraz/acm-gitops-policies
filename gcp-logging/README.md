@@ -55,19 +55,13 @@ validated for structure and server-side admission only.
 
 ## Required changes for 3 infra nodes
 
-1. **The collector must run on the infra nodes too**, or their logs (routers,
-   monitoring, registry) are not forwarded. Check after tainting:
+1. **Placement is automatic.** The collector DaemonSet tolerates every taint,
+   so it runs on every node and forwards the infra nodes' logs too. With infra
+   nodes, the Cluster Logging and Cluster Observability operators run on them,
+   tolerating every `NoSchedule`/`PreferNoSchedule` taint and any
+   `node-role.kubernetes.io/infra` taint. Check:
    ```
    oc get ds -n openshift-logging        # DESIRED = number of nodes
-   ```
-   If the infra nodes are missing, add to the `ClusterLogForwarder` in
-   `day2-logging-gcp-forwarder.yaml`:
-   ```yaml
-   spec:
-     collector:
-       tolerations:
-         - key: node-role.kubernetes.io/infra
-           operator: Exists
    ```
 2. **Optional:** with more nodes, log volume and Cloud Logging cost grow. Use
    ClusterLogForwarder `filters` to drop noisy namespaces or debug-level logs.
