@@ -1,0 +1,40 @@
+# Opt-in: label a managed cluster with etcd-backup=gcs once its bucket and GCP
+# service account exist (see README.md). OpenShift on GCP with WIF only.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-openshift-gcp-etcd-backup
+  namespace: rhacm-policies
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: vendor
+              operator: In
+              values: ["OpenShift"]
+            - key: cloud
+              operator: In
+              values: ["Google"]
+            - key: etcd-backup
+              operator: In
+              values: ["gcs"]
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-openshift-gcp-etcd-backup
+  namespace: rhacm-policies
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: placement-openshift-gcp-etcd-backup
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: PolicySet
+    name: openshift-gcp-etcd-backup

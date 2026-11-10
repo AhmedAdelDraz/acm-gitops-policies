@@ -1,0 +1,252 @@
+# etcd backups to a Google Cloud Storage bucket, authenticating with GCP Workload
+# Identity Federation (no service account key on the cluster).
+#
+# Every 6 hours a CronJob runs on one control-plane node:
+#   1. init container (privileged, host network/PID): cluster-backup.sh writes
+#      snapshot_<ts>.db and static_kuberesources_<ts>.tar.gz to /var/tmp/etcd-backup;
+#   2. upload container: gcloud logs in with the CCO-issued external_account config
+#      and copies both files to gs://<bucket>/<infrastructure name>/<UTC timestamp>/,
+#      then empties the host directory.
+# Retention is a lifecycle rule on the bucket, so the job only needs to create objects.
+#
+# Discovered on the managed cluster:
+#   - bucket:          <GCP project ID>-<infrastructure name>-etcd-backup
+#   - object prefix:   <infrastructure name>
+#   - WIF audience:    from the CCO-managed openshift-ingress-operator/cloud-credentials
+#   - GCP service account: key "<cluster>.etcd-backup" of the hub ConfigMap
+#     rhacm-policies/gcp-wif-service-accounts when set (ccoctl names), otherwise
+#     openshift-etcd-backup@<project ID>.iam.gserviceaccount.com
+#
+# The bucket, the service account and its IAM bindings are created once per cluster;
+# see gcp-etcd-backup/README.md.
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-etcd-backup-gcs
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CP Contingency Planning
+    policy.open-cluster-management.io/controls: CP-9 System Backup
+spec:
+  disabled: false
+  policy-templates:
+    # The init container needs host access (privileged SCC). The CCO turns the
+    # CredentialsRequest into ocp-etcd-backup/etcd-backup-gcp-wif.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: etcd-backup-gcs-access
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: ocp-etcd-backup
+                  labels:
+                    pod-security.kubernetes.io/enforce: privileged
+                    pod-security.kubernetes.io/audit: privileged
+                    pod-security.kubernetes.io/warn: privileged
+                    security.openshift.io/scc.podSecurityLabelSync: "false"
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: etcd-backup
+                  namespace: ocp-etcd-backup
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: etcd-backup-scc-privileged
+                  namespace: ocp-etcd-backup
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: system:openshift:scc:privileged
+                subjects:
+                  - kind: ServiceAccount
+                    name: etcd-backup
+                    namespace: ocp-etcd-backup
+            # predefinedRoles is only read by ccoctl; with plain gcloud the role is
+            # granted on the bucket instead (see README).
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cloudcredential.openshift.io/v1
+                kind: CredentialsRequest
+                metadata:
+                  name: etcd-backup-gcs
+                  namespace: openshift-cloud-credential-operator
+                spec:
+                  serviceAccountNames:
+                    - etcd-backup
+                  secretRef:
+                    name: etcd-backup-gcp-wif
+                    namespace: ocp-etcd-backup
+                  cloudTokenPath: /var/run/secrets/openshift/serviceaccount/token
+                  providerSpec:
+                    apiVersion: cloudcredential.openshift.io/v1
+                    kind: GCPProviderSpec
+                    predefinedRoles:
+                      - roles/storage.objectCreator
+                    skipServiceCheck: true
+                    audience: '{{ (fromSecret "openshift-ingress-operator" "cloud-credentials" "service_account.json" | base64dec | mustFromJson).audience }}'
+                    serviceAccountEmail: '{{ $sa := "{{hub with (lookup "v1" "ConfigMap" "rhacm-policies" "gcp-wif-service-accounts").data hub}}{{hub dig (printf "%s.etcd-backup" $.ManagedClusterName) "" . hub}}{{hub end hub}}" }}{{ if not $sa }}{{ $sa = printf "openshift-etcd-backup@%s.iam.gserviceaccount.com" (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.platformStatus.gcp.projectID }}{{ end }}{{ $sa }}'
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: etcd-backup-gcs-access
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: etcd-backup-gcs-cronjob
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: batch/v1
+                kind: CronJob
+                metadata:
+                  name: etcd-backup
+                  namespace: ocp-etcd-backup
+                spec:
+                  schedule: "0 */6 * * *"
+                  concurrencyPolicy: Forbid
+                  successfulJobsHistoryLimit: 3
+                  failedJobsHistoryLimit: 5
+                  jobTemplate:
+                    spec:
+                      backoffLimit: 1
+                      activeDeadlineSeconds: 1800
+                      template:
+                        metadata:
+                          labels:
+                            app: etcd-backup
+                        spec:
+                          serviceAccountName: etcd-backup
+                          restartPolicy: Never
+                          # Same host access as "oc debug node": cluster-backup.sh reaches
+                          # etcd on localhost and uses the node's container runtime.
+                          hostNetwork: true
+                          hostPID: true
+                          nodeSelector:
+                            node-role.kubernetes.io/master: ""
+                          tolerations:
+                            - key: node-role.kubernetes.io/master
+                              operator: Exists
+                              effect: NoSchedule
+                            - key: node-role.kubernetes.io/control-plane
+                              operator: Exists
+                              effect: NoSchedule
+                          initContainers:
+                            - name: snapshot
+                              image: registry.access.redhat.com/ubi9/ubi:latest
+                              command: ["/bin/bash", "-c"]
+                              args:
+                                - |
+                                  set -euo pipefail
+                                  rm -rf /host/var/tmp/etcd-backup/*
+                                  chroot /host /usr/local/bin/cluster-backup.sh /var/tmp/etcd-backup
+                                  ls -lh /host/var/tmp/etcd-backup
+                              securityContext:
+                                privileged: true
+                                runAsUser: 0
+                              volumeMounts:
+                                - name: host
+                                  mountPath: /host
+                          containers:
+                            - name: upload
+                              image: gcr.io/google.com/cloudsdktool/google-cloud-cli:slim
+                              env:
+                                - name: BUCKET
+                                  value: '{{ with (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status }}{{ .platformStatus.gcp.projectID }}-{{ .infrastructureName }}-etcd-backup{{ end }}'
+                                - name: CLUSTER
+                                  value: '{{ (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.infrastructureName }}'
+                                - name: CLOUDSDK_CONFIG
+                                  value: /tmp/gcloud
+                              command: ["/bin/bash", "-c"]
+                              args:
+                                - |
+                                  set -euo pipefail
+                                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                                  gcloud auth login --cred-file=/gcp/service_account.json --quiet
+                                  gcloud storage cp /backup/* "gs://${BUCKET}/${CLUSTER}/${TS}/"
+                                  rm -rf /backup/*
+                              securityContext:
+                                privileged: true
+                                runAsUser: 0
+                              volumeMounts:
+                                - name: backup
+                                  mountPath: /backup
+                                - name: gcp-credentials
+                                  mountPath: /gcp
+                                  readOnly: true
+                                - name: bound-sa-token
+                                  mountPath: /var/run/secrets/openshift/serviceaccount
+                                  readOnly: true
+                          volumes:
+                            - name: host
+                              hostPath:
+                                path: /
+                                type: Directory
+                            - name: backup
+                              hostPath:
+                                path: /var/tmp/etcd-backup
+                                type: DirectoryOrCreate
+                            # external_account config written by the CCO (no key).
+                            - name: gcp-credentials
+                              secret:
+                                secretName: etcd-backup-gcp-wif
+                            # Token that GCP STS exchanges; the WIF provider accepts the
+                            # "openshift" audience.
+                            - name: bound-sa-token
+                              projected:
+                                sources:
+                                  - serviceAccountToken:
+                                      audience: openshift
+                                      expirationSeconds: 3600
+                                      path: token
+    # NonCompliant until a backup has succeeded within the last 13 hours (two
+    # scheduled runs). A new cluster reports NonCompliant until its first run.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: etcd-backup-gcs-cronjob
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: etcd-backup-gcs-recent
+        spec:
+          severity: high
+          remediationAction: inform
+          object-templates-raw: |
+            {{- $ok := false }}
+            {{- with (lookup "batch/v1" "CronJob" "ocp-etcd-backup" "etcd-backup").status }}
+            {{- with .lastSuccessfulTime }}
+            {{- if lt (sub (now | unixEpoch) (toDate "2006-01-02T15:04:05Z07:00" . | unixEpoch)) 46800 }}{{ $ok = true }}{{ end }}
+            {{- end }}
+            {{- end }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: batch/v1
+                kind: CronJob
+                metadata:
+                  name: etcd-backup
+                  namespace: ocp-etcd-backup
+                  {{- if not $ok }}
+                  annotations:
+                    no-successful-etcd-backup-in-the-last-13h: "true"
+                  {{- end }}

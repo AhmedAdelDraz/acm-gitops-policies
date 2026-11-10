@@ -1,0 +1,9 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: PolicySet
+metadata:
+  name: openshift-gcp-etcd-backup
+  namespace: rhacm-policies
+spec:
+  description: etcd backups every 6 hours to a Google Cloud Storage bucket with Workload Identity Federation
+  policies:
+    - day2-etcd-backup-gcs
