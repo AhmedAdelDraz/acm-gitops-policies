@@ -181,7 +181,23 @@ spec:
                                   set -euo pipefail
                                   TS=$(date -u +%Y%m%dT%H%M%SZ)
                                   gcloud auth login --cred-file=/gcp/service_account.json --quiet
-                                  gcloud storage cp /backup/* "gs://${BUCKET}/${CLUSTER}/${TS}/"
+                                  TOKEN=$(gcloud auth print-access-token)
+                                  shopt -s nullglob
+                                  FILES=(/backup/*)
+                                  if [ ${#FILES[@]} -eq 0 ]; then echo "no backup files in /backup" >&2; exit 1; fi
+                                  # JSON API upload, one request per file. Needs only
+                                  # storage.objects.create (gcloud storage cp also reads the
+                                  # destination); ifGenerationMatch=0 never overwrites an object.
+                                  for f in "${FILES[@]}"; do
+                                    NAME="${CLUSTER}/${TS}/$(basename "$f")"
+                                    if ! curl -sS --fail-with-body -o /tmp/response -X POST -T "$f" \
+                                      -H "Authorization: Bearer ${TOKEN}" \
+                                      -H "Content-Type: application/octet-stream" \
+                                      "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&ifGenerationMatch=0&name=${NAME//\//%2F}"; then
+                                      cat /tmp/response >&2; exit 1
+                                    fi
+                                    echo "uploaded gs://${BUCKET}/${NAME} ($(du -h "$f" | cut -f1))"
+                                  done
                                   rm -rf /backup/*
                               securityContext:
                                 privileged: true
