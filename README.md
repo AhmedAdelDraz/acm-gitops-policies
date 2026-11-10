@@ -21,6 +21,7 @@ acm-gitops-policies/   (repository root)
 │   ├── operators/                  # Gatekeeper, Descheduler
 │   ├── infrastructure/             # infra MCP; ingress, monitoring, registry on infra nodes
 │   └── cluster-settings/           # console banner, telemetry opt-out, update channel check
+├── hub-infra/                      # the self-managed hub only (local-cluster=true): ACM, MCE, klusterlet agents, GitOps on infra nodes
 ├── gcp-logging/                    # cluster-specific: cloud=Google
 └── network-observability/          # cluster-specific: opt-in label network-observability=enabled (Loki on GCS on GCP, MCG elsewhere)
 ```
@@ -33,6 +34,7 @@ acm-gitops-policies/   (repository root)
 | Operators | `baseline-operators` | all OpenShift clusters | [baseline/operators](baseline/operators/README.md) |
 | Infrastructure | `baseline-infrastructure` | all OpenShift clusters | [baseline/infrastructure](baseline/infrastructure/README.md) |
 | Cluster settings | `baseline-cluster-settings` | all OpenShift clusters | [baseline/cluster-settings](baseline/cluster-settings/README.md) |
+| Hub infrastructure | `hub-infra` | `local-cluster=true` | [hub-infra](hub-infra/README.md) |
 | GCP logging | `openshift-gcp-logging` | `vendor=OpenShift`, `cloud=Google` | [gcp-logging](gcp-logging/README.md) |
 | Network Observability | `openshift-network-observability` | `vendor=OpenShift`, `network-observability=enabled` | [network-observability](network-observability/README.md) |
 

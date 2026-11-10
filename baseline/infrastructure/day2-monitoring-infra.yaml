@@ -13,7 +13,8 @@ spec:
   policy-templates:
     # Platform monitoring baseline: user workload monitoring on, 15 days of metrics.
     # Decided on each managed cluster:
-    #   - infra nodes present: every component moves to them.
+    #   - infra nodes present: every component moves to them and tolerates every
+    #     NoSchedule/PreferNoSchedule taint plus any node-role.kubernetes.io/infra taint.
     #   - default StorageClass present: Prometheus and Alertmanager get persistent
     #     storage from it (otherwise they keep emptyDir and would stay Pending on PVCs).
     - objectDefinition:
@@ -46,6 +47,10 @@ spec:
                       nodeSelector:
                         node-role.kubernetes.io/infra: ""
                       tolerations:
+                        - operator: Exists
+                          effect: NoSchedule
+                        - operator: Exists
+                          effect: PreferNoSchedule
                         - key: node-role.kubernetes.io/infra
                           operator: Exists
                       {{- end }}
@@ -62,6 +67,10 @@ spec:
                       nodeSelector:
                         node-role.kubernetes.io/infra: ""
                       tolerations:
+                        - operator: Exists
+                          effect: NoSchedule
+                        - operator: Exists
+                          effect: PreferNoSchedule
                         - key: node-role.kubernetes.io/infra
                           operator: Exists
                       {{- end }}
@@ -78,6 +87,10 @@ spec:
                       nodeSelector:
                         node-role.kubernetes.io/infra: ""
                       tolerations:
+                        - operator: Exists
+                          effect: NoSchedule
+                        - operator: Exists
+                          effect: PreferNoSchedule
                         - key: node-role.kubernetes.io/infra
                           operator: Exists
                     {{- end }}

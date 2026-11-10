@@ -7,12 +7,19 @@ workloads when such nodes exist**. Clusters without infra nodes, such as the
 current single-node hub, keep their placement, so the group is safe to enforce
 everywhere.
 
+**Tolerations.** Every infra-placed workload tolerates every `NoSchedule` and
+`PreferNoSchedule` taint, plus any effect of the `node-role.kubernetes.io/infra`
+taint, so the infra nodes can be tainted in any way that keeps other pods off.
+Other `NoExecute` taints are not tolerated on purpose: tolerating
+`node.kubernetes.io/unreachable` would keep pods bound to a failed node instead
+of rescheduling them.
+
 | Policy | Mode | What it does |
 |---|---|---|
 | `day2-infra-machineconfigpool` | enforce | Creates the `infra` MachineConfigPool. It selects nodes labelled `node-role.kubernetes.io/infra` and renders worker MachineConfigs plus any with role `infra`. |
-| `day2-ingress-infra` | enforce | With infra nodes: default IngressController on infra nodes, one replica per infra node (max 3), tolerating the infra taint. The node selector is **replaced**, not merged, and every other field (default certificate, endpoint strategy, TLS) is preserved. |
-| `day2-monitoring-infra` | enforce | `cluster-monitoring-config`: user workload monitoring on, Prometheus retention 15d. With infra nodes: all platform monitoring components on infra nodes. With a default StorageClass: Prometheus gets a 100Gi PVC and Alertmanager 5Gi. |
-| `day2-image-registry-infra` | enforce | With infra nodes: registry on infra nodes, tolerating the infra taint. Replicas are raised to one per infra node (max 3) **only on object storage**. Storage and `managementState` are left as configured. `recordDiff` is off because the spec contains the registry `httpSecret`. |
+| `day2-ingress-infra` | enforce | With infra nodes: default IngressController on infra nodes, one replica per infra node (max 3). The node selector is **replaced**, not merged, and every other field (default certificate, endpoint strategy, TLS) is preserved. |
+| `day2-monitoring-infra` | enforce | `cluster-monitoring-config`: user workload monitoring on, Prometheus retention 15d. With infra nodes: all platform monitoring components on infra nodes, except `prometheusOperatorAdmissionWebhook`, which has no placement settings in 4.22 (the monitoring operator places it; check `oc get pods -n openshift-monitoring -o wide` after tainting the infra nodes). User workload monitoring is **not** managed: its ConfigMap is written by the MCE HyperShift add-on (remote write), and replacing it would fight that operator. With a default StorageClass: Prometheus gets a 100Gi PVC and Alertmanager 5Gi. |
+| `day2-image-registry-infra` | enforce | With infra nodes: registry and the nightly image pruner jobs on infra nodes. Replicas are raised to one per infra node (max 3) **only on object storage**. Storage and `managementState` are left as configured. `recordDiff` is off because the spec contains the registry `httpSecret`. |
 
 ## Current setup (single node)
 

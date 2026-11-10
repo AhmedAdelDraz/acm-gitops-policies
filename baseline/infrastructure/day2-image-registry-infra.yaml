@@ -22,6 +22,7 @@ spec:
     # As in day2-ingress-infra, the current spec is read back and only nodeSelector,
     # tolerations and replicas are replaced, so an existing node selector is
     # replaced rather than merged and every other field is preserved.
+    # Tolerations as in day2-ingress-infra.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -42,7 +43,7 @@ spec:
             {{- $_ := set $spec "replicas" $replicas }}
             {{- end }}
             {{- $_ := set $spec "nodeSelector" (dict "node-role.kubernetes.io/infra" "") }}
-            {{- $_ = set $spec "tolerations" (list (dict "key" "node-role.kubernetes.io/infra" "operator" "Exists")) }}
+            {{- $_ = set $spec "tolerations" (list (dict "operator" "Exists" "effect" "NoSchedule") (dict "operator" "Exists" "effect" "PreferNoSchedule") (dict "key" "node-role.kubernetes.io/infra" "operator" "Exists")) }}
             - complianceType: mustonlyhave
               metadataComplianceType: musthave
               recordDiff: None
@@ -58,6 +59,41 @@ spec:
               objectDefinition:
                 apiVersion: imageregistry.operator.openshift.io/v1
                 kind: Config
+                metadata:
+                  name: cluster
+            {{- end }}
+    # The nightly image pruner jobs run on the infra nodes too.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: image-pruner-infra
+        spec:
+          severity: low
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- if gt (len (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items) 0 }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: imageregistry.operator.openshift.io/v1
+                kind: ImagePruner
+                metadata:
+                  name: cluster
+                spec:
+                  nodeSelector:
+                    node-role.kubernetes.io/infra: ""
+                  tolerations:
+                    - operator: Exists
+                      effect: NoSchedule
+                    - operator: Exists
+                      effect: PreferNoSchedule
+                    - key: node-role.kubernetes.io/infra
+                      operator: Exists
+            {{- else }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: imageregistry.operator.openshift.io/v1
+                kind: ImagePruner
                 metadata:
                   name: cluster
             {{- end }}
