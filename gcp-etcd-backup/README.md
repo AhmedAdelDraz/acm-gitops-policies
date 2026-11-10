@@ -25,11 +25,11 @@ short-lived credential config, so no service account key is stored on the cluste
 3. **Retention** is a lifecycle rule on the bucket. The job can only create
    objects: it cannot read, overwrite or delete existing backups.
 
-| Discovered on the cluster | Current hub |
+| Discovered on the cluster | Value |
 |---|---|
-| Bucket `<project ID>-<infrastructure name>-etcd-backup` | `openenv-fs9jx-ocp4-l49rg-etcd-backup` |
-| Object prefix `<infrastructure name>` | `ocp4-l49rg` |
-| GCP service account (default) `openshift-etcd-backup@<project ID>.iam.gserviceaccount.com` | `openshift-etcd-backup@openenv-fs9jx.iam.gserviceaccount.com` |
+| Bucket | `<project ID>-<infrastructure name>-etcd-backup` |
+| Object prefix | `<infrastructure name>` |
+| GCP service account (default) | `openshift-etcd-backup@<project ID>.iam.gserviceaccount.com` |
 | Kubernetes ServiceAccount | `ocp-etcd-backup/etcd-backup` |
 
 With `ccoctl` the GCP service account gets a generated name. Put it in key
