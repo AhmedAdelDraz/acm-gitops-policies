@@ -19,9 +19,13 @@ short-lived credential config, so no service account key is stored on the cluste
    `static_kuberesources_<ts>.tar.gz` on the node.
 2. **Upload container** (`google-cloud-cli:slim`): `gcloud auth login
    --cred-file` with the CCO-issued `external_account` config, which exchanges
-   the pod's ServiceAccount token (audience `openshift`) with GCP STS. Both files
-   go to `gs://<bucket>/<infrastructure name>/<UTC timestamp>/`, and the node
-   directory is emptied.
+   the pod's ServiceAccount token (audience `openshift`) with GCP STS. Each file
+   is then uploaded with one Cloud Storage JSON API request (`curl`, with
+   `ifGenerationMatch=0` so nothing is overwritten) to
+   `gs://<bucket>/<infrastructure name>/<UTC timestamp>/`, and the node
+   directory is emptied. `gcloud storage cp` is not used for the upload because
+   it also reads the destination (`storage.objects.get`), which the
+   create-only role does not allow.
 3. **Retention** is a lifecycle rule on the bucket. The job can only create
    objects: it cannot read, overwrite or delete existing backups.
 
@@ -142,5 +146,6 @@ non-production cluster; a restore is disruptive.
 | Pod stuck `CreateContainerConfigError`, Secret `etcd-backup-gcp-wif` not found | The CCO has not processed the CredentialsRequest | `oc get credentialsrequest etcd-backup-gcs -n openshift-cloud-credential-operator -o yaml` |
 | `upload`: `Gaia id not found` or `PERMISSION_DENIED` on `generateAccessToken` | Service account missing or no workloadIdentityUser binding | Step 3 |
 | `upload`: `403` on the bucket | Missing `roles/storage.objectCreator` | Step 3 |
+| `(gcloud.storage.cp) HTTPError 403 … does not have storage.objects.get access` | An older version of the policy used `gcloud storage cp`, which reads the destination | Use the current policy (JSON API upload); do not grant read access to the backup service account |
 | `snapshot` fails | etcd unhealthy or not enough disk on the node | `oc get etcd -o=jsonpath='{range .items[0].status.conditions[*]}{.type}={.status}{"\n"}{end}'` and node disk |
 | Policy NonCompliant, annotation `no-successful-etcd-backup-in-the-last-13h` | Two runs in a row failed, or no run yet | `oc get jobs -n ocp-etcd-backup` and the logs above |
