@@ -140,7 +140,9 @@ spec:
                       - roles/logging.logWriter
                     skipServiceCheck: true
                     audience: '{{ (fromSecret "openshift-ingress-operator" "cloud-credentials" "service_account.json" | base64dec | mustFromJson).audience }}'
-                    serviceAccountEmail: 'openshift-logging-writer@{{ (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.platformStatus.gcp.projectID }}.iam.gserviceaccount.com'
+                    # Key "<cluster>.logging" of the hub ConfigMap rhacm-policies/gcp-wif-service-accounts
+                    # when set (the random name ccoctl generates), otherwise openshift-logging-writer@<project ID>.
+                    serviceAccountEmail: '{{ $sa := "{{hub with (lookup "v1" "ConfigMap" "rhacm-policies" "gcp-wif-service-accounts").data hub}}{{hub dig (printf "%s.logging" $.ManagedClusterName) "" . hub}}{{hub end hub}}" }}{{ if not $sa }}{{ $sa = printf "openshift-logging-writer@%s.iam.gserviceaccount.com" (lookup "config.openshift.io/v1" "Infrastructure" "" "cluster").status.platformStatus.gcp.projectID }}{{ end }}{{ $sa }}'
             - complianceType: musthave
               objectDefinition:
                 apiVersion: observability.openshift.io/v1

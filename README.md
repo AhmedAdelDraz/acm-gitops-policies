@@ -40,6 +40,10 @@ acm-gitops-policies/   (repository root)
 | GCP etcd backup | `openshift-gcp-etcd-backup` | `vendor=OpenShift`, `cloud=Google`, `etcd-backup=gcs` (opt-in) | [gcp-etcd-backup](gcp-etcd-backup/README.md) |
 | Network Observability | `openshift-network-observability` | `vendor=OpenShift`, `network-observability=enabled` | [network-observability](network-observability/README.md) |
 
+GCP logging and Network Observability on GCP need one-time GCP service
+accounts (and a bucket for Loki) per cluster: with `gcloud` as in each group's
+README, or with `ccoctl` as in [docs/gcp-wif-ccoctl.md](docs/gcp-wif-ccoctl.md).
+
 ## Conventions
 
 - **Baseline vs. cluster-specific.** `baseline/` holds policies that need no
