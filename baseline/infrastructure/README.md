@@ -19,6 +19,7 @@ of rescheduling them.
 | `day2-infra-machineconfigpool` | enforce | Creates the `infra` MachineConfigPool. It selects nodes labelled `node-role.kubernetes.io/infra` and renders worker MachineConfigs plus any with role `infra`. |
 | `day2-ingress-infra` | enforce | With infra nodes: default IngressController on infra nodes, one replica per infra node (max 3). The node selector is **replaced**, not merged, and every other field (default certificate, endpoint strategy, TLS) is preserved. |
 | `day2-monitoring-infra` | enforce | `cluster-monitoring-config`: user workload monitoring on, Prometheus retention 15d. With infra nodes: all platform monitoring components on infra nodes, except `prometheusOperatorAdmissionWebhook`, which has no placement settings in 4.22 (the monitoring operator places it; check `oc get pods -n openshift-monitoring -o wide` after tainting the infra nodes). User workload monitoring is **not** managed: its ConfigMap is written by the MCE HyperShift add-on (remote write), and replacing it would fight that operator. With a default StorageClass: Prometheus gets a 100Gi PVC and Alertmanager 5Gi. |
+| `day2-infra-node-taint` | enforce + inform report | Default toleration for platform and operator namespaces, then taints every infra node `node-role.kubernetes.io/infra=reserved:NoSchedule`, recreates operator pods stuck on the taint, and reports blocked application pods. See [Infra node taint](#infra-node-taint). |
 | `day2-image-registry-infra` | enforce | With infra nodes: registry and the nightly image pruner jobs on infra nodes. Replicas are raised to one per infra node (max 3) **only on object storage**. Storage and `managementState` are left as configured. `recordDiff` is off because the spec contains the registry `httpSecret`. |
 
 ## Current setup (single node)
@@ -73,3 +74,54 @@ oc get pods -n openshift-ingress -o wide          # 3 router pods on infra nodes
 oc get pods -n openshift-monitoring -o wide       # all on infra nodes
 oc get pods -n openshift-image-registry -o wide
 ```
+
+## Infra node taint
+
+`day2-infra-node-taint` runs four steps in order:
+
+1. **Namespace default toleration.** The `PodTolerationRestriction` admission
+   plugin (enabled in OpenShift) adds
+   `{key: node-role.kubernetes.io/infra, operator: Exists, effect: NoSchedule}`
+   to every pod created in a namespace annotated with
+   `scheduler.alpha.kubernetes.io/defaultTolerations`. The policy sets that
+   annotation on:
+   - `openshift`, `openshift-*`, `kube-*`;
+   - `open-cluster-management*`, `multicluster-engine`, `hive`, `hypershift`;
+   - **every namespace with an OperatorGroup**, so operators installed later
+     tolerate the taint (`openshift-operators` covers all-namespaces installs);
+   - namespaces labelled `infra-tolerations=enabled` (opt-in for applications).
+2. **Taint.** Only after step 1 is Compliant, every node labelled
+   `node-role.kubernetes.io/infra` gets `node-role.kubernetes.io/infra=reserved:NoSchedule`.
+   `NoSchedule` never evicts running pods.
+3. **Recreate stuck operator pods.** If an operator's first pod is created
+   before its new namespace is annotated, it stays Pending on the taint. The
+   policy deletes such pods (Pending, unschedulable because of this taint,
+   owned by a controller, in a namespace that now has the default) so they are
+   recreated with the toleration. Evaluated every 1–2 minutes.
+4. **Report blocked pods (inform).** Pods held back by the taint in namespaces
+   without the default toleration are listed as violations.
+
+**No worker nodes:** application namespaces (for example PipelineRun pods in a
+user namespace) cannot start new pods while the infra nodes are tainted. Opt a
+namespace in with:
+
+```
+oc label namespace <namespace> infra-tolerations=enabled
+```
+
+Pods that already run keep running; new pods in that namespace tolerate the
+taint within a minute or two (step 1 is re-evaluated), and any stuck pod there
+is recreated by step 3.
+
+**Verify:**
+
+```
+oc get nodes -l node-role.kubernetes.io/infra -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
+oc get ns openshift-operators -o jsonpath='{.metadata.annotations.scheduler\.alpha\.kubernetes\.io/defaultTolerations}{"\n"}'
+oc get pods -A --field-selector=status.phase=Pending
+```
+
+**Remove the taint:** delete this policy from the PolicySet first (otherwise
+it is re-applied), then
+`oc adm taint node -l node-role.kubernetes.io/infra node-role.kubernetes.io/infra-`.
+

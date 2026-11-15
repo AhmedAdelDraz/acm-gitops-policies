@@ -1,0 +1,191 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: day2-infra-node-taint
+  namespace: rhacm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/controls: CM-7 Least Functionality
+spec:
+  disabled: false
+  policy-templates:
+    # Default toleration for the platform and operator namespaces, applied by the
+    # PodTolerationRestriction admission plugin to every pod created in them (it
+    # is enabled in OpenShift). Covered namespaces:
+    #   - openshift, openshift-*, kube-*
+    #   - open-cluster-management*, multicluster-engine, hive, hypershift
+    #   - every namespace with an OperatorGroup, so operators installed later
+    #     tolerate the taint (openshift-operators covers AllNamespaces installs)
+    #   - namespaces labelled infra-tolerations=enabled (opt-in for applications)
+    # The toleration is the same one the ACM/MCE pods already carry, so it never
+    # conflicts with a pod's own tolerations. Existing pods are not changed; pods
+    # created afterwards get it.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: infra-namespace-default-tolerations
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- $og := dict }}
+            {{- range $g := (lookup "operators.coreos.com/v1" "OperatorGroup" "" "").items }}{{ $_ := set $og $g.metadata.namespace true }}{{ end }}
+            {{- range $n := (lookup "v1" "Namespace" "" "").items }}
+            {{- $name := $n.metadata.name }}
+            {{- $labels := $n.metadata.labels | default dict }}
+            {{- $platform := or (eq $name "openshift") (hasPrefix "openshift-" $name) (hasPrefix "kube-" $name) (hasPrefix "open-cluster-management" $name) (has $name (list "multicluster-engine" "hive" "hypershift")) }}
+            {{- $optIn := eq (index $labels "infra-tolerations" | default "") "enabled" }}
+            {{- if and (not $n.metadata.deletionTimestamp) (or $platform (hasKey $og $name) $optIn) }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ $name }}
+                  annotations:
+                    scheduler.alpha.kubernetes.io/defaultTolerations: '[{"key":"node-role.kubernetes.io/infra","operator":"Exists","effect":"NoSchedule"}]'
+            {{- end }}
+            {{- end }}
+    # Taints every node labelled node-role.kubernetes.io/infra, only after the
+    # namespaces above have their default toleration. NoSchedule never evicts
+    # running pods; it only keeps new pods without the toleration off the node.
+    # musthave adds the taint and keeps any other taint on the node.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: infra-namespace-default-tolerations
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: infra-node-taint
+        spec:
+          severity: high
+          remediationAction: enforce
+          object-templates-raw: |
+            {{- range $node := (lookup "v1" "Node" "" "" "node-role.kubernetes.io/infra").items }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Node
+                metadata:
+                  name: {{ $node.metadata.name }}
+                spec:
+                  taints:
+                    - key: node-role.kubernetes.io/infra
+                      value: reserved
+                      effect: NoSchedule
+            {{- else }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.openshift.io/v1
+                kind: Infrastructure
+                metadata:
+                  name: cluster
+            {{- end }}
+    # Safety net for a new operator namespace: a pod created before the namespace
+    # got its default toleration stays Pending on the taint. Such pods are deleted
+    # so their controller recreates them with the toleration. Only pods that are
+    # unschedulable because of this taint, owned by a controller, and in a
+    # namespace that now has the default toleration are touched.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: infra-node-taint
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: infra-taint-recreate-pending-pods
+        spec:
+          severity: medium
+          remediationAction: enforce
+          evaluationInterval:
+            compliant: 2m
+            noncompliant: 1m
+          object-templates-raw: |
+            {{- $tolerating := dict }}
+            {{- range $n := (lookup "v1" "Namespace" "" "").items }}
+            {{- if contains "node-role.kubernetes.io/infra" (index ($n.metadata.annotations | default dict) "scheduler.alpha.kubernetes.io/defaultTolerations" | default "") }}{{ $_ := set $tolerating $n.metadata.name true }}{{ end }}
+            {{- end }}
+            {{- $found := false }}
+            {{- range $p := (lookup "v1" "Pod" "" "").items }}
+            {{- if and (eq $p.status.phase "Pending") (not $p.spec.nodeName) (hasKey $tolerating $p.metadata.namespace) $p.metadata.ownerReferences }}
+            {{- range $c := ($p.status.conditions | default list) }}
+            {{- if and (eq $c.type "PodScheduled") (eq ($c.reason | default "") "Unschedulable") (contains "node-role.kubernetes.io/infra" ($c.message | default "")) }}
+            {{- $found = true }}
+            - complianceType: mustnothave
+              objectDefinition:
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  name: {{ $p.metadata.name }}
+                  namespace: {{ $p.metadata.namespace }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if not $found }}
+            - complianceType: mustnothave
+              objectDefinition:
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  name: no-pod-waiting-on-infra-taint
+                  namespace: openshift-config
+            {{- end }}
+    # Report only: pods that cannot start because of the taint in namespaces
+    # without the default toleration (for example application namespaces while
+    # the cluster has no worker nodes). Label such a namespace
+    # infra-tolerations=enabled to let it run on the infra nodes.
+    - extraDependencies:
+        - apiVersion: policy.open-cluster-management.io/v1
+          kind: ConfigurationPolicy
+          name: infra-node-taint
+          compliance: Compliant
+      objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: infra-taint-blocked-pods
+        spec:
+          severity: medium
+          remediationAction: inform
+          evaluationInterval:
+            compliant: 2m
+            noncompliant: 2m
+          object-templates-raw: |
+            {{- $tolerating := dict }}
+            {{- range $n := (lookup "v1" "Namespace" "" "").items }}
+            {{- if contains "node-role.kubernetes.io/infra" (index ($n.metadata.annotations | default dict) "scheduler.alpha.kubernetes.io/defaultTolerations" | default "") }}{{ $_ := set $tolerating $n.metadata.name true }}{{ end }}
+            {{- end }}
+            {{- $found := false }}
+            {{- range $p := (lookup "v1" "Pod" "" "").items }}
+            {{- if and (eq $p.status.phase "Pending") (not $p.spec.nodeName) (not (hasKey $tolerating $p.metadata.namespace)) }}
+            {{- range $c := ($p.status.conditions | default list) }}
+            {{- if and (eq $c.type "PodScheduled") (eq ($c.reason | default "") "Unschedulable") (contains "node-role.kubernetes.io/infra" ($c.message | default "")) }}
+            {{- $found = true }}
+            - complianceType: mustnothave
+              objectDefinition:
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  name: {{ $p.metadata.name }}
+                  namespace: {{ $p.metadata.namespace }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if not $found }}
+            - complianceType: mustnothave
+              objectDefinition:
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  name: no-pod-blocked-by-infra-taint
+                  namespace: openshift-config
+            {{- end }}

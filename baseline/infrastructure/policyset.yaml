@@ -4,9 +4,10 @@ metadata:
   name: baseline-infrastructure
   namespace: rhacm-policies
 spec:
-  description: Infra machine config pool; ingress, monitoring and image registry on infra nodes when present
+  description: Infra machine config pool and node taint; ingress, monitoring and image registry on infra nodes when present
   policies:
   - day2-image-registry-infra
   - day2-infra-machineconfigpool
   - day2-ingress-infra
   - day2-monitoring-infra
+  - day2-infra-node-taint
