@@ -94,15 +94,11 @@ policies are applied:
    ```
    oc label node <infra-node> node-role.kubernetes.io/infra=""
    ```
-2. **Taint them** so only infrastructure workloads run there (this also keeps
-   them out of OpenShift subscription counts). **Only when the cluster also has
-   worker nodes**: with no workers and tainted masters, the infra nodes are the
-   only place general workloads (Pipelines, Gatekeeper, GitOps, ACM) can run.
-   ```
-   oc adm taint node <infra-node> node-role.kubernetes.io/infra=reserved:NoSchedule
-   ```
-   Every infra-placed workload in these policies tolerates the
-   `node-role.kubernetes.io/infra` key with any value or effect.
+2. **Taint them:** done by `day2-infra-node-taint`
+   (`node-role.kubernetes.io/infra=reserved:NoSchedule`). It first gives the
+   platform and operator namespaces a default toleration, so existing and future
+   operators keep running; see
+   [baseline/infrastructure](baseline/infrastructure/README.md#infra-node-taint).
 3. **Point `*.apps` at the infra nodes.** Once the routers move there, the
    external load balancer or DNS for the application wildcard must target the
    infra nodes instead of the old router nodes, or routes stop resolving.
@@ -123,9 +119,10 @@ policies are applied:
 was validated with these policies on 2026-11-07:
 
 - masters are tainted `NoSchedule` (`mastersSchedulable: false`); the infra
-  nodes carry only `node-role.kubernetes.io/infra` and are **not tainted**, so
-  every non-control-plane workload runs on them. Do not taint them unless
-  worker nodes are added first.
+  nodes carry only `node-role.kubernetes.io/infra`. With no worker nodes,
+  every non-control-plane workload runs on them; once `day2-infra-node-taint`
+  taints them, only namespaces with the default toleration (platform, operators,
+  and those labelled `infra-tolerations=enabled`) can start new pods there.
 - MachineConfigPools: `master` 3/3, `infra` 3/3, `worker` 0, all updated.
 - Routers (3), monitoring, image registry (3 replicas on GCS), Pipelines,
   Gatekeeper and GitOps run on the infra nodes; the GCP logging collector and
